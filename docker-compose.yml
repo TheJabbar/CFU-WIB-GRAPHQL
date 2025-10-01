@@ -1,0 +1,51 @@
+services:
+  cfu-wib-bot:
+    image: cfu-wib-bot:latest
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: cfu-wib-bot
+    ports:
+      - 8123:8123
+    networks:
+      - app-network
+    volumes:
+      - ./api/main.py:/app/main.py
+      - ./api/.env:/app/.env
+      - ./api/lib:/app/lib
+      - ./api/llm_engine.py:/app/llm_engine.py
+      - ./api/config.py:/app/config.py
+      - ./api/database.py:/app/database.py
+      - ./api/security.py:/app/security.py
+      - ./api/utils.py:/app/utils.py
+      - ./api/data:/app/data
+      - ./api/routes.py:/app/routes.py
+      - ./api/model.py:/app/model.py
+      - ./api/chart_generator.py:/app/chart_generator.py
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
+  cfu-wib-chainlit:
+    build:
+      context: ./chainlit
+      dockerfile: Dockerfile
+    container_name: cfu-wib-chainlit
+    ports:
+      - 7899:7899
+    networks:
+      - app-network
+    volumes:
+      - ./chainlit/app.py:/app/app.py
+      - ./chainlit/.env:/app/.env
+      - ./chainlit/.chainlit/config.toml:/app/.chainlit/config.toml
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
+networks:
+  app-network:
+    driver: bridge
+    name: cfu-wib-sql-chatbot_app-network

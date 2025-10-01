@@ -1,0 +1,5 @@
+chainlit
+httpx
+python-dotenv
+loguru
+plotly

@@ -1,0 +1,15 @@
+fastapi
+httpx
+loguru
+minio
+pandas
+pydantic
+pydantic-settings
+python-dotenv
+python-multipart
+requests
+secure
+tenacity
+tqdm
+uvicorn
+plotly
