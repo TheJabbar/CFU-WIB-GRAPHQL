@@ -20,8 +20,8 @@ services:
       - ./api/utils.py:/app/utils.py
       - ./api/data:/app/data
       - ./api/routes.py:/app/routes.py
-      - ./api/model.py:/app/model.py
       - ./api/chart_generator.py:/app/chart_generator.py
+      - ./api/graphql_schema.py:/app/graphql_schema.py
     restart: unless-stopped
     dns:
       - 8.8.8.8

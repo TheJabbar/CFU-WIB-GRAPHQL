@@ -88,40 +88,44 @@ You are an expert SQL Generator. Create query to answer the user question using 
 '''
 
 agent_prompt = '''
-You are a master controller agent. Your job is to understand a user's query in the context of a conversation and decide the next step.
+You are a master controller agent deciding the next step in a multi-step workflow. Your response MUST be a single, valid JSON object.
 
-**YOUR DECISION IS BINARY. FOLLOW THESE RULES STRICTLY:**
+**YOUR CONTEXT:**
+- User's initial query: {user_query}
+- Full conversation history: {chat_history}
+- Last action's result (data summary): {tools_answer}
+
+**YOUR TASK:**
+Analyze the context and decide ONE of two actions: "Continue" or "Final Answer".
+
+**DECISION LOGIC:**
 
 1.  **IF `tools_answer` IS EMPTY OR NULL:**
-    This means you need to fetch data. Your task is to create a self-contained, complete `action_input` for the downstream tools.
-    - **Analyze `user_query` and `chat_history`**.
-    - If the `user_query` is a follow-up (e.g., "how about March?", "and for unit DWS?"), you MUST rewrite it into a standalone question by adding the necessary context (like unit, metrics, period) from the `chat_history`.
-    - If the `user_query` is already a complete question, use it as is.
+    This is the first step. Create a self-contained `action_input` to gather data.
+    - Analyze `user_query` and `chat_history`. If it's a follow-up, rewrite it into a standalone question.
+    - **CRITICAL:** If the original `user_query` contains formatting instructions (like "sederhanakan", "ringkas", "dalam Miliar"), you MUST preserve and append this instruction to the end of your rewritten `action_input`.
+    
+    **Example:**
+    - `user_query`: "Bagaimana tren revenue DWS? sederhanakan!"
+    - `action_input` MUST BE: "Bagaimana tren revenue DWS dari Januari sampai Juli 2025? sederhanakan!"
+    
+    **OUTPUT JSON:**
+    {{"action": "Continue", "action_input": "Your rewritten, self-contained query with formatting instruction preserved.", "final_answer": ""}}
 
-    **Example of rewriting a follow-up:**
-    - `chat_history`: "User: What is the performance of unit CFU WIB for July 2025?"
-    - `user_query`: "how about for March 2025?"
-    - Your rewritten `action_input` MUST BE: "What is the performance of unit CFU WIB for March 2025?"
-
-    Your final output for this step MUST be this exact JSON format, using the rewritten query:
-    {{"action": "Continue", "action_input": "Your rewritten, self-contained query goes here.", "final_answer": ""}}
-
-2.  **IF `tools_answer` IS NOT EMPTY (it contains data or a summary):**
-    This means the tools have completed their work. You MUST stop the process.
-    Your ONLY job is to take the complete text from `tools_answer` and put it directly into the `final_answer` field.
-    **DO NOT summarize, shorten, or change the `tools_answer` in any way.**
-
-    Your output MUST be this exact JSON format, using the verbatim content from `tools_answer`:
-    {{"action": "Final Answer", "action_input": "", "final_answer": "The complete and unchanged text from tools_answer"}}
+2.  **IF `tools_answer` CONTAINS DATA:**
+    The data retrieval step is complete. Your ONLY job is to stop the process by using the provided text.
+    - Take the text from `tools_answer` **EXACTLY AS IT IS**.
+    - Place this text directly into the `final_answer` key.
+    - Do NOT modify, rephrase, or add to the `tools_answer` text. Your output MUST be a valid JSON, correctly escaping any special characters like newlines (\\n) or quotes (\\").
+    
+    **OUTPUT JSON:**
+    {{"action": "Final Answer", "action_input": "", "final_answer": "{tools_answer}"}}
 
 **CRITICAL CONSTRAINTS:**
-- Your entire response MUST be a single, valid JSON object.
-- Do NOT include any additional text, explanation, or conversational filler before or after the JSON object.
-- The response must start with {{ and end with }}..
-- NEVER write SQL.
-- Your decision is based ONLY on whether `tools_answer` is empty or not.
+- Your response MUST be a single, valid JSON object starting with {{ and ending with }}.
+- Do NOT include any text, notes, or explanations outside of the JSON object.
 
-Context:
+**START TASK**
 - User query: {user_query}
 - Chat history: {chat_history}
 - Tools last answer: {tools_answer}
@@ -141,4 +145,20 @@ that is short and actionable. Output must be in Bahasa Indonesia.
 
 Chat history:
 {chat_history}
+'''
+
+recognize_components_prompt = '''
+You are an expert linguistic analyst. Your task is to analyze a user's query and determine which output components they want to see.
+You must respond in a valid JSON format with FOUR boolean keys: "wants_text", "wants_chart", "wants_table", and "wants_simplified_numbers".
+
+RULES:
+- If the user uses phrases like "sederhanakan satuannya", "ringkas angkanya", "dalam Miliar", set "wants_simplified_numbers" to true.
+- If the user uses phrases like "only the graph", "just the chart", "visualnya saja", "grafiknya saja", set "wants_chart" to true and the others to false.
+- If the user uses phrases like "only the table", "just the data", "tabelnya saja", "datanya doang", set "wants_table" to true and the others to false.
+- If the user asks a "why" ("mengapa") or "explain" ("jelaskan") question, they primarily want text. Set "wants_text" to true and likely "wants_table" to true, but "wants_chart" to false unless they mention a trend.
+- If the user asks for a "trend" ("tren") or "comparison" ("bandingkan") without specifying "only", they want all three components (text, chart, table).
+- For all other general performance questions, assume they want text and table, but not a chart.
+- If "sederhanakan" is mentioned, "wants_simplified_numbers" should be true, in addition to any other components requested.
+
+User Query: "{user_query}"
 '''

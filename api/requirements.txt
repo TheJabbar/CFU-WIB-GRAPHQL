@@ -13,3 +13,4 @@ tenacity
 tqdm
 uvicorn
 plotly
+strawberry-graphql[fastapi]

@@ -1,15 +1,12 @@
 from typing import List, Dict, Any, Optional, Tuple
 import json
-import re
-import os
 import time
-from fastapi import Depends, HTTPException
+import re
+from fastapi import HTTPException
 from fastapi.security.api_key import APIKey
 from loguru import logger
 
-# Project modules
-from security import get_api_key
-from model import QueryInput, ChatHistoryInput, ChatResponse
+# Internal modules
 from config import settings
 from database import get_table_columns, execute_query
 
@@ -31,113 +28,138 @@ from lib.prompt import (
     select_table_and_prompt_prompt,
     generate_topic_prompt,
     recommendation_question_prompt,
+    recognize_components_prompt
 )
 
 from chart_generator import ChartGenerator
 
 
-# Constants
+# Runtime constants
 SQL_FIX_RETRIES = 3
 MAX_AGENT_STEPS = 3
 
 
-# JSON Helpers
+# JSON utilities
 def _extract_json_object(text: str) -> Optional[str]:
-    """Extract the first complete JSON object from a string, handling nested structures."""
+    """Extract the first valid JSON object from a string, considering nested braces."""
     if not text:
         return None
-    
+
     s = text.strip()
-    
-    # Find the first opening brace
-    first_brace = s.find('{')
+    first_brace = s.find("{")
     if first_brace == -1:
         return None
-        
-    # Find the matching closing brace
+
     brace_count = 0
     for i in range(first_brace, len(s)):
-        if s[i] == '{':
+        if s[i] == "{":
             brace_count += 1
-        elif s[i] == '}':
+        elif s[i] == "}":
             brace_count -= 1
-        
-        # If brace_count is zero, we've found the end of the object
+
         if brace_count == 0:
-            potential_json = s[first_brace : i + 1]
+            candidate = s[first_brace : i + 1]
             try:
-                # Try to load it to ensure it's valid
-                json.loads(potential_json)
-                return potential_json
+                json.loads(candidate)
+                return candidate
             except json.JSONDecodeError:
-                # If it fails, continue searching in case of malformed objects
                 continue
-    
-    # If no complete object is found, return None
+
     return None
 
+
 def _safe_json_loads(text_or_obj, required_keys: Optional[List[str]] = None) -> Optional[dict]:
-    """Safe json.loads that handles str/dict noisy inputs, optional key validation."""
+    """
+    A safer json.loads wrapper that handles both strings and dicts,
+    and extracts the first valid JSON block if the input is noisy.
+    """
     if isinstance(text_or_obj, dict):
         data = text_or_obj
     elif isinstance(text_or_obj, str):
         s = text_or_obj.strip()
-        try:
-            data = json.loads(s)
-        except Exception:
-            extracted = _extract_json_object(s)
-            if not extracted:
-                return None
-            try:
-                data = json.loads(extracted)
-            except Exception:
-                return None
+        first_brace = s.find("{")
+        if first_brace == -1:
+            return None
+
+        brace_count = 1
+        for i in range(first_brace + 1, len(s)):
+            if s[i] == "{":
+                brace_count += 1
+            elif s[i] == "}":
+                brace_count -= 1
+
+            if brace_count == 0:
+                json_block = s[first_brace : i + 1]
+                try:
+                    data = json.loads(json_block)
+                    break
+                except json.JSONDecodeError:
+                    brace_count = 1
+                    continue
+        else:
+            return None
     else:
         return None
-    if required_keys:
-        for k in required_keys:
-            if k not in data:
-                return None
+
+    if required_keys and not all(k in data for k in required_keys):
+        logger.warning(
+            f"JSON missing required keys. Got: {list(data.keys())}, Expected: {required_keys}"
+        )
+        return None
+
     return data
 
 
-# Chart Helpers
-def _should_generate_chart(prompt_name: str, user_query: str) -> bool:
-    """Determine if chart is relevant based on prompt or keywords."""
-    trend_keywords = ['trend', 'grafik', 'chart', 'perbandingan', 'tampilkan']
-    trend_prompts = [
-        'CFU Trend Analysis',
-        'CFU Comparison Trend Analysis',
-        'CFU External Revenue Trend Analysis'
-    ]
-    return (prompt_name in trend_prompts or any(k in (user_query or "").lower() for k in trend_keywords))
+# Chart helpers
+def _should_generate_chart(prompt_name: str, user_query: str, rows: List[Dict[str, Any]]) -> bool:
+    """Check if a chart should be generated based on prompt type and available data."""
+    trend_prompts = {
+        "CFU Trend Analysis",
+        "CFU Comparison Trend Analysis",
+        "CFU External Revenue Trend Analysis",
+    }
+    is_trend_request = prompt_name in trend_prompts
+
+    has_multiple_periods = False
+    if rows and "period" in rows[0]:
+        unique_periods = len({row["period"] for row in rows})
+        has_multiple_periods = unique_periods > 1
+
+    return is_trend_request and has_multiple_periods
+
 
 def _determine_chart_type(prompt_name: str, user_query: str) -> str:
-    """Return chart type based on prompt name."""
-    if 'Comparison Trend' in (prompt_name or ''):
+    """Select chart type string based on prompt name."""
+    if "Comparison Trend" in (prompt_name or ""):
         return "comparison_trend"
-    elif 'External Revenue Trend' in (prompt_name or ''):
+    if "External Revenue Trend" in (prompt_name or ""):
         return "external_revenue_trend"
     return "trend"
 
 
-# Modular Functions
+# Core agent functions
 async def select_table_and_prompt(user_query: str) -> Tuple[str, str, str]:
     """
-    Select table & prompt using LLM.
+    Use LLM to select the most relevant table and prompt.
     Returns: (table_name, instruction_prompt, prompt_name_for_chart).
     """
     t0 = time.monotonic()
-    tables_list = [f"{c['table_name']}: {c.get('table_description', '')}" for c in settings.tables_config]
-    prompt_list = [f"{p['prompt_name']}: {p.get('prompt_description', '')}" for p in settings.prompt_config]
+    tables_list = [
+        f"{c['table_name']}: {c.get('table_description', '')}"
+        for c in settings.tables_config
+    ]
+    prompt_list = [
+        f"{p['prompt_name']}: {p.get('prompt_description', '')}"
+        for p in settings.prompt_config
+    ]
 
     raw = await telkomllm_select_table(
         prompt=select_table_and_prompt_prompt,
         tables_list=tables_list,
         prompt_list=prompt_list,
-        user_query=user_query
+        user_query=user_query,
     )
-    logger.debug(f"[Timing] select_table_and_prompt {(time.monotonic()-t0):.2f}s")
+    logger.debug(f"[Timing] select_table_and_prompt {(time.monotonic() - t0):.2f}s")
 
     parsed = _safe_json_loads(raw, required_keys=["table_name", "prompt"])
     if not parsed:
@@ -145,48 +167,52 @@ async def select_table_and_prompt(user_query: str) -> Tuple[str, str, str]:
         default_table = settings.tables_config[0]["table_name"] if settings.tables_config else ""
         default_prompt = settings.prompt_config[0]["prompt_name"] if settings.prompt_config else ""
         if not default_table or not default_prompt:
-            raise HTTPException(status_code=502, detail="LLM select_table invalid and no fallback available.")
+            raise HTTPException(status_code=502, detail="No valid fallback for select_table.")
         parsed = {"table_name": default_table, "prompt": default_prompt}
 
     table_name = parsed["table_name"]
-    valid_names = [c['table_name'] for c in settings.tables_config]
+    valid_names = [c["table_name"] for c in settings.tables_config]
     if table_name not in valid_names:
         raise HTTPException(status_code=400, detail=f"Invalid table selected by LLM: {table_name}")
 
     instruction_prompt = settings.get_prompt_by_name(parsed["prompt"])
-    prompt_name_for_chart = parsed["prompt"]
-    return table_name, instruction_prompt, prompt_name_for_chart
+    return table_name, instruction_prompt, parsed["prompt"]
+
 
 def get_schema_and_sample(table_name: str) -> Tuple[List[str], Dict[str, Any]]:
-    """Retrieve column list and first sample row for LLM context."""
+    """Fetch table schema and a sample row for context."""
     t0 = time.monotonic()
     column_list = get_table_columns(settings.database_api_path, table_name)
     if not column_list:
-        raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found or has no columns.")
+        raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found or empty.")
+
     first_row_list = execute_query(settings.database_api_path, f"SELECT * FROM {table_name} LIMIT 1")
-    first_row = first_row_list[0] if isinstance(first_row_list, list) and first_row_list else {}
-    logger.debug(f"[Timing] get_schema_and_sample {(time.monotonic()-t0):.2f}s")
+    first_row = first_row_list[0] if first_row_list else {}
+    logger.debug(f"[Timing] get_schema_and_sample {(time.monotonic() - t0):.2f}s")
     return column_list, first_row
 
+
 async def execute_agent_step(agent_prompt_text: str, query: str, chat_history: Optional[str], tools_answer: str) -> Dict[str, Any]:
-    """Run one agent step. Returns dict(action, action_input, final_answer) safely."""
+    """Run a single agent step. Returns dict with keys: action, action_input, final_answer."""
     t0 = time.monotonic()
     raw = await telkomllm_main_agent(
         agent_prompt=agent_prompt_text,
         user_query=query,
         chat_history=chat_history or "",
-        tools_answer=tools_answer or ""
+        tools_answer=tools_answer or "",
     )
-    logger.debug(f"[Timing] execute_agent_step {(time.monotonic()-t0):.2f}s")
+    logger.debug(f"[Timing] execute_agent_step {(time.monotonic() - t0):.2f}s")
+
     state = _safe_json_loads(raw, required_keys=["action", "action_input", "final_answer"])
     if not state:
         logger.warning(f"[Agentic] main_agent invalid JSON. Raw: {str(raw)[:300]}")
         state = {"action": "Continue", "action_input": query, "final_answer": ""}
     return state
 
+
 async def generate_and_validate_sql(table_name: str, columns_list: List[str], first_row: Dict[str, Any],
                                     user_query: str, instruction_prompt: str) -> str:
-    """Request LLM to generate SQL. Raise 500 if LLM returns error object."""
+    """Ask LLM to generate SQL and validate the response."""
     t0 = time.monotonic()
     generated_sql = await telkomllm_generate_sql(
         prompt=generate_sql_prompt,
@@ -194,9 +220,9 @@ async def generate_and_validate_sql(table_name: str, columns_list: List[str], fi
         columns_list=columns_list,
         first_row=first_row,
         user_query=user_query,
-        instruction_prompt=instruction_prompt
+        instruction_prompt=instruction_prompt,
     )
-    logger.debug(f"[Timing] generate_and_validate_sql {(time.monotonic()-t0):.2f}s")
+    logger.debug(f"[Timing] generate_and_validate_sql {(time.monotonic() - t0):.2f}s")
     logger.info(f"[Agentic] Generated SQL: {generated_sql}")
 
     if isinstance(generated_sql, dict) and "error" in generated_sql:
@@ -204,26 +230,29 @@ async def generate_and_validate_sql(table_name: str, columns_list: List[str], fi
         raise HTTPException(status_code=500, detail=f"LLM SQL generation failed: {generated_sql['error']}")
     return generated_sql
 
+
 async def execute_sql_query(generated_sql: str, columns_list: List[str]) -> List[Dict[str, Any]]:
-    """Execute SQL with error handling and LLM-assisted fix with retries."""
+    """Run SQL query with error handling and retry using LLM-based fix if needed."""
     t0 = time.monotonic()
     try:
         rows = execute_query(settings.database_api_path, generated_sql)
-        logger.debug(f"[Timing] execute_sql_query {(time.monotonic()-t0):.2f}s (success). Rows={len(rows)}")
+        logger.debug(f"[Timing] execute_sql_query {(time.monotonic() - t0):.2f}s (success). Rows={len(rows)}")
+
         if not rows:
-            # Try fix when empty
-            logger.warning("[Agentic] Query returned no rows. Attempting fix...")
+            logger.warning("[Agentic] Query returned no rows. Trying LLM fix...")
             fixed_sql = await telkomllm_fix_sql(
                 prompt=sql_fix_prompt,
                 columns_list=columns_list,
                 error_sql=generated_sql,
-                error_message="No data found for the given query. Fix the SQL query."
+                error_message="No data found for the given query."
             )
             rows = execute_query(settings.database_api_path, fixed_sql)
             logger.debug(f"[Agentic] Fixed empty result. Rows={len(rows)}")
+
         return rows
+
     except Exception as exec_error:
-        logger.warning(f"[Agentic] SQL error: {exec_error}. Attempting to fix...")
+        logger.warning(f"[Agentic] SQL error: {exec_error}. Trying to fix...")
         fixed_sql = await telkomllm_fix_sql(
             prompt=sql_fix_prompt,
             columns_list=columns_list,
@@ -231,19 +260,25 @@ async def execute_sql_query(generated_sql: str, columns_list: List[str]) -> List
             error_message=str(exec_error)
         )
         last_exc = exec_error
+
         for attempt in range(SQL_FIX_RETRIES):
             try:
                 rows = execute_query(settings.database_api_path, fixed_sql)
-                logger.debug(f"[Timing] execute_sql_query FIX {(time.monotonic()-t0):.2f}s (attempt {attempt+1}). Rows={len(rows)}")
+                logger.debug(
+                    f"[Timing] execute_sql_query FIX {(time.monotonic() - t0):.2f}s "
+                    f"(attempt {attempt+1}). Rows={len(rows)}"
+                )
                 return rows
             except Exception as e2:
                 last_exc = e2
+
         logger.error(f"[Agentic] SQL execution failed after retries: {last_exc}")
-        raise HTTPException(status_code=500, detail=f"SQL execution failed after retries: {last_exc}")
+        raise HTTPException(status_code=500, detail=f"SQL execution failed: {last_exc}")
+
 
 async def generate_insight(table_name: str, columns_list: List[str], table_data: List[Dict[str, Any]],
                            user_query: str, instruction_prompt: str) -> str:
-    """Generate insight from SQL query results."""
+    """Use LLM to generate textual insight from query results."""
     t0 = time.monotonic()
     insight = await telkomllm_infer_sql(
         prompt=generate_insight_prompt,
@@ -253,153 +288,147 @@ async def generate_insight(table_name: str, columns_list: List[str], table_data:
         column_list=columns_list,
         table_data=table_data
     )
-    logger.debug(f"[Timing] generate_insight {(time.monotonic()-t0):.2f}s")
+    logger.debug(f"[Timing] generate_insight {(time.monotonic() - t0):.2f}s")
     return str(insight)
 
-def maybe_build_chart(prompt_name: str, user_query: str, rows: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """Generate Plotly chart JSON if relevant."""
-    if not rows:
-        return None, None, None
-    if _should_generate_chart(prompt_name, user_query):
-        chart_type = _determine_chart_type(prompt_name, user_query)
-        chart_json = ChartGenerator.create_trend_chart(rows, chart_type)
-        if chart_json:
-            logger.info("[Agentic] Plotly chart generated")
-            return chart_json, "plotly", chart_type
-    return None, None, None
 
-# API functions (called by main.py)
+async def get_insight_logic(
+    query: str,
+    chat_history: Optional[str],
+    requested_fields: List[str]
+) -> Dict[str, Any]:
+    """Main agent logic. Handles table selection, SQL execution, insight generation, and optional chart/data output."""
+    table_name, instruction_prompt, prompt_name_for_chart = await select_table_and_prompt(query)
+    column_list, first_row = get_schema_and_sample(table_name)
 
-async def get_insight_api(
-    input_data: QueryInput,
-    x_api_key: APIKey = Depends(get_api_key)
-) -> ChatResponse:
-    """
-    Main insight generation entry:
-    - Select table & prompt
-    - Loop agent until Final Answer (max MAX_AGENT_STEPS)
-    - If continue: Generate SQL -> Execute -> Generate Insight
-    - Return narrative + raw rows + optional chart
-    """
-    try:
-        # Step 0: Select table & prompt
-        table_name, instruction_prompt, prompt_name_for_chart = await select_table_and_prompt(input_data.query)
+    insight_text = ""
+    last_rows: List[Dict[str, Any]] = []
+    step_count = 0
+    agent_state = {"action": "Start", "action_input": query, "final_answer": ""}
 
-        # Step 1: Get schema + sample row
-        column_list, first_row = get_schema_and_sample(table_name)
+    while agent_state["action"] != "Final Answer":
+        if step_count >= MAX_AGENT_STEPS:
+            logger.warning("[Agentic] Reached MAX_AGENT_STEPS. Forcing final answer.")
+            agent_state["final_answer"] = insight_text or "No insights available."
+            break
 
-        # Step 2: Loop agent until Final Answer or max steps reached = 3
-        insight_text = ""
-        last_rows: List[Dict[str, Any]] = []
-        step_count = 0
-        final_output: Optional[str] = None
+        agent_state = await execute_agent_step(
+            agent_prompt_text=agent_prompt,
+            query=agent_state["action_input"],
+            chat_history=chat_history,
+            tools_answer=insight_text
+        )
+        logger.debug(f"[Agentic] Step {step_count+1} state: {agent_state}")
 
-        agent_state = {
-            "action": "Start",
-            "action_input": input_data.query,
-            "final_answer": "",
-        }
+        if agent_state["action"] == "Final Answer":
+            break
 
-        while agent_state["action"] != "Final Answer":
-            if step_count >= MAX_AGENT_STEPS:
-                logger.warning(f"[Agentic] Reached MAX_AGENT_STEPS={MAX_AGENT_STEPS}. Forcing final answer.")
-                agent_state["action"] = "Final Answer"
-                agent_state["final_answer"] = insight_text or "No insights available."
-                break
+        action_input = agent_state.get("action_input") or query
+        generated_sql = await generate_and_validate_sql(
+            table_name=table_name,
+            columns_list=column_list,
+            first_row=first_row,
+            user_query=action_input,
+            instruction_prompt=instruction_prompt
+        )
+        rows = await execute_sql_query(generated_sql, column_list)
+        last_rows = rows
 
-            logger.debug(f"[Debug] Chat history input: {input_data.chat_history}")
-
-            # Run one agent step
-            agent_state = await execute_agent_step(
-                agent_prompt_text=agent_prompt,
-                query=agent_state["action_input"],
-                chat_history=input_data.chat_history,
-                tools_answer=insight_text
-            )
-            logger.debug(f"[Agentic] Step {step_count+1} state: {agent_state}")
-
-            # Final?
-            if agent_state["action"] == "Final Answer":
-                final_output = agent_state.get("final_answer") or insight_text or "No insights available."
-                break
-
-            # Continue => SQL -> Exec -> Insight
-            action_input = agent_state.get("action_input") or input_data.query
-            generated_sql = await generate_and_validate_sql(
-                table_name=table_name,
-                columns_list=column_list,
-                first_row=first_row,
-                user_query=action_input,
-                instruction_prompt=instruction_prompt
-            )
-            rows = await execute_sql_query(generated_sql, column_list)
-            last_rows = rows
+        # Generate text insight only if explicitly requested
+        if "output" in requested_fields:
+            logger.info("Logic: Client requested text, generating insight...")
             insight_text = await generate_insight(
                 table_name=table_name,
                 columns_list=column_list,
                 table_data=rows,
-                user_query=input_data.query,
+                user_query=query,
                 instruction_prompt=instruction_prompt
             )
-            logger.info(f"[Agentic] Partial insight: {str(insight_text)[:300]}...")
-            step_count += 1
+        else:
+            insight_text = "Data successfully retrieved from the database."
 
-        # Fallback final output if none
-        if final_output is None:
-            final_output = agent_state.get("final_answer") or insight_text or "No insights available."
+        step_count += 1
 
-        # Step 3: Optional chart
-        data_rows: List[Dict[str, Any]] = last_rows if isinstance(last_rows, list) else []
-        data_columns: List[str] = list(data_rows[0].keys()) if data_rows else []
-        chart_json, chart_library, chart_type = maybe_build_chart(prompt_name_for_chart, input_data.query, data_rows)
+    final_output = agent_state.get("final_answer") or (insight_text if "output" in requested_fields else "")
 
-        return ChatResponse(
-            output=str(final_output),
-            chart=chart_json,
-            chart_type=chart_type,
-            chart_library=chart_library,
-            data_columns=data_columns,
-            data_rows=data_rows
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"get_insight_api error: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+    # Chart generation if requested
+    chart_json, chart_library, chart_type = (None, None, None)
+    if "chart" in requested_fields:
+        logger.info("Logic: Client requested chart, checking eligibility...")
+        if _should_generate_chart(prompt_name_for_chart, query, last_rows):
+            chart_type = _determine_chart_type(prompt_name_for_chart, query)
+            chart_json = ChartGenerator.create_trend_chart(last_rows, chart_type)
+            if chart_json:
+                logger.info("[Agentic] Chart generated via Plotly")
+                chart_library = "plotly"
+        else:
+            logger.info("Chart skipped: not a trend request or insufficient data.")
 
-async def get_topic_api(
-    input_data: ChatHistoryInput,
-    x_api_key: APIKey = Depends(get_api_key)
-) -> ChatResponse:
-    """Get topic from chat history."""
-    try:
-        topic = await telkomllm_generate_topic(
-            prompt=generate_topic_prompt,
-            user_query=input_data.chat_history or ""
-        )
-        logger.debug(f"[Debug] Topic generated from chat history: {topic}")
-        return ChatResponse(output=str(topic))
-        logger.debug(f"[Debug] Topic generated from chat history: {topic}")
-    except Exception as e:
-        logger.error(f"get_topic_api error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Raw data if requested
+    data_rows_to_send, data_columns_to_send = [], []
+    if "dataRows" in requested_fields and last_rows:
+        data_rows_to_send = last_rows
+        if "dataColumns" in requested_fields:
+            data_columns_to_send = list(last_rows[0].keys())
 
-async def get_recommendation_question(
-    input_data: ChatHistoryInput,
-    x_api_key: APIKey = Depends(get_api_key)
-) -> ChatResponse:
-    """Get one recommended follow-up question from chat history."""
-    try:
-        rec_q = await telkomllm_generate_recommendation_question(
-            prompt=recommendation_question_prompt,
-            chat_history=input_data.chat_history or ""
-        )
-        logger.info(f"[Agentic] Generated Recommendation Question: {rec_q}")
-        return ChatResponse(output=str(rec_q))
-    except Exception as e:
-        logger.error(f"get_recommendation_question error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "output": str(final_output),
+        "chart": chart_json,
+        "chart_type": chart_type,
+        "chart_library": chart_library,
+        "data_columns": data_columns_to_send,
+        "data_rows": data_rows_to_send
+    }
+
+
+async def get_topic_logic(chat_history: str) -> str:
+    """Generate discussion topic based on the chat history."""
+    topic = await telkomllm_generate_topic(
+        prompt=generate_topic_prompt,
+        user_query=chat_history or ""
+    )
+    return str(topic)
+
+
+async def get_recommendation_logic(chat_history: str) -> str:
+    """Generate a recommendation-related question from the chat history."""
+    rec_q = await telkomllm_generate_recommendation_question(
+        prompt=recommendation_question_prompt,
+        chat_history=chat_history or ""
+    )
+    return str(rec_q)
+
+
+async def get_intent_logic(query: str) -> Dict[str, bool]:
+    """
+    Identify the intended output components from a user query.
+    Returns a dictionary with four keys: wants_text, wants_chart,
+    wants_table, and wants_simplified_numbers.
+    """
+    logger.info(f"Recognizing intent for query: '{query}'")
+
+    raw_response = await telkomllm_main_agent(
+        agent_prompt=recognize_components_prompt.format(user_query=query),
+        user_query=query
+    )
+    parsed_intent = _safe_json_loads(raw_response)
+
+    required_keys = ["wants_text", "wants_chart", "wants_table", "wants_simplified_numbers"]
+
+    if parsed_intent and all(k in parsed_intent for k in required_keys):
+        logger.info(f"Intent recognized: {parsed_intent}")
+        return parsed_intent
+
+    # Fallback if parsing fails
+    logger.warning("Failed to parse intent from LLM, using fallback defaults.")
+    return {
+        "wants_text": True,
+        "wants_chart": False,
+        "wants_table": True,
+        "wants_simplified_numbers": "sederhanakan" in query.lower()
+    }
+
 
 async def health_check() -> Dict[str, str]:
-    """Health check endpoint body."""
+    """Return a simple status indicator for health checks."""
     return {"status": "ok"}

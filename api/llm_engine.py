@@ -60,7 +60,6 @@ async def telkomllm_fix_sql(prompt, columns_list, error_sql, error_message):
     }
     return await make_async_api_call(URL_CUSTOM_LLM, TOKEN_CUSTOM_LLM, payload)
 
-# New agent function
 async def telkomllm_main_agent(agent_prompt, user_query, chat_history="", tools_answer=""):
     payload = {
         "model": "telkom-ai-instruct",
