@@ -67,7 +67,7 @@ class ChatSession:
         """Append user query and assistant response to history."""
         self.chat_history.append({"user": user_query, "assistant": response})
 
-    def get_history_string(self, last_n: int = 5) -> str:
+    def get_history_string(self, last_n: int = 3) -> str:
         """Return last N exchanges as a single formatted string."""
         history_str = ""
         for exchange in self.chat_history[-last_n:]:
@@ -254,7 +254,7 @@ async def main(message: cl.Message):
         intent = await recognize_user_intent(user_query)
         
         # Step 2: Call main agent with optimized query
-        chat_history = chat_session.get_history_string()
+        chat_history = chat_session.get_history_string(last_n=3)
         insight_result = await make_insight_request(user_query, chat_history, intent)
 
         insight_data = insight_result.get("data", {}).get("getInsight", {})
@@ -315,7 +315,7 @@ async def main(message: cl.Message):
         chat_session.add_to_history(user_query, answer)
 
         # Step 3: Background post-analysis (topic & recommendations)
-        updated_chat_history = chat_session.get_history_string()
+        updated_chat_history = chat_session.get_history_string(last_n=3)
 
         async def post_analysis_task():
             try:
