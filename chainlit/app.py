@@ -16,6 +16,8 @@ API_URL = os.getenv("API_URL")
 API_KEY = os.getenv("X_API_KEY")
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120.0"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", None)
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", None)
 
 # Basic authentication for Chainlit
 @cl.password_auth_callback
