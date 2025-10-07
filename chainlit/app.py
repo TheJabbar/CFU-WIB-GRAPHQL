@@ -176,7 +176,7 @@ async def recognize_user_intent(user_query: str) -> Dict[str, bool]:
             "wants_text": intent_data.get("wantsText", True),
             "wants_chart": intent_data.get("wantsChart", False),
             "wants_table": intent_data.get("wantsTable", True),
-            "wants_simplified_numbers": intent_data.get("wantsSimplifiedNumbers", False),
+            "wants_simplified_numbers": intent_data.get("wantsSimplifiedNumbers", True),
         }
     except Exception:
         # Fallback when recognizer fails

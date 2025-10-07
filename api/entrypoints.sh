@@ -6,4 +6,4 @@
 # echo "Copying data done ..."
 
 echo "Starting CFU WIB application ..."
-/app/.venv/bin/uvicorn main:app --port 8123 --host 0.0.0.0 --workers 1 --reload
+/app/.venv/bin/uvicorn main:app --port 5123 --host 0.0.0.0 --workers 1 --reload
