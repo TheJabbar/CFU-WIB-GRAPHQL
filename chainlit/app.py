@@ -96,16 +96,18 @@ def format_insight_text(text: str, formatter: Callable[[Any], str]) -> str:
         return ""
 
     def replace_number(match):
-        num_str = match.group(0).replace(".", "").replace(",", "")
+        num_str = match.group(0).replace(",", "")
         try:
-            number = int(num_str)
+            number = float(num_str)
+            if number.is_integer():
+                number = int(number)
+            
             return formatter(number) if abs(number) >= 1_000_000 else match.group(0)
         except (ValueError, TypeError):
             return match.group(0)
 
     pattern = r"\b\d{1,3}(?:[.,]\d{3})+(?:\.\d+)?\b|\b\d{7,}\b"
     return re.sub(pattern, replace_number, text)
-
 
 def rows_to_markdown_table(
     rows: List[Dict[str, Any]],
@@ -163,7 +165,6 @@ async def recognize_user_intent(user_query: str) -> Dict[str, bool]:
                 wantsText
                 wantsChart
                 wantsTable
-                wantsSimplifiedNumbers
             }
         }
     """
@@ -175,16 +176,14 @@ async def recognize_user_intent(user_query: str) -> Dict[str, bool]:
         return {
             "wants_text": intent_data.get("wantsText", True),
             "wants_chart": intent_data.get("wantsChart", False),
-            "wants_table": intent_data.get("wantsTable", True),
-            "wants_simplified_numbers": intent_data.get("wantsSimplifiedNumbers", False),
+            "wants_table": intent_data.get("wantsTable", True)
         }
     except Exception:
         # Fallback when recognizer fails
         return {
             "wants_text": True,
             "wants_chart": False,
-            "wants_table": True,
-            "wants_simplified_numbers": "sederhanakan" in user_query.lower(),
+            "wants_table": True
         }
 
 async def make_insight_request(user_query: str, chat_history: str, intent: Dict[str, bool]):
@@ -267,7 +266,7 @@ async def main(message: cl.Message):
         data_columns = insight_data.get("dataColumns", [])
         
         # Choose formatter depending on intent
-        formatter = format_number_simplified if intent.get("wants_simplified_numbers") else None
+        formatter = format_number_simplified
         
         # Format table and text if available
         table_md = rows_to_markdown_table(data_rows, data_columns, formatter=formatter) if data_rows else ""

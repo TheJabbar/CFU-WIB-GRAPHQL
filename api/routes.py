@@ -413,7 +413,7 @@ async def get_intent_logic(query: str) -> Dict[str, bool]:
     )
     parsed_intent = _safe_json_loads(raw_response)
 
-    required_keys = ["wants_text", "wants_chart", "wants_table", "wants_simplified_numbers"]
+    required_keys = ["wants_text", "wants_chart", "wants_table"]
 
     if parsed_intent and all(k in parsed_intent for k in required_keys):
         logger.info(f"Intent recognized: {parsed_intent}")
@@ -424,8 +424,7 @@ async def get_intent_logic(query: str) -> Dict[str, bool]:
     return {
         "wants_text": True,
         "wants_chart": False,
-        "wants_table": True,
-        "wants_simplified_numbers": "sederhanakan" in query.lower()
+        "wants_table": True
     }
 
 

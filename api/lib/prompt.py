@@ -149,16 +149,14 @@ Chat history:
 
 recognize_components_prompt = '''
 You are an expert linguistic analyst. Your task is to analyze a user's query and determine which output components they want to see.
-You must respond in a valid JSON format with FOUR boolean keys: "wants_text", "wants_chart", "wants_table", and "wants_simplified_numbers".
+You must respond in a valid JSON format with FOUR boolean keys: "wants_text", "wants_chart", "wants_table".
 
 RULES:
-- If the user uses phrases like "sederhanakan satuannya", "ringkas angkanya", "dalam Miliar", set "wants_simplified_numbers" to true.
 - If the user uses phrases like "only the graph", "just the chart", "visualnya saja", "grafiknya saja", set "wants_chart" to true and the others to false.
 - If the user uses phrases like "only the table", "just the data", "tabelnya saja", "datanya doang", set "wants_table" to true and the others to false.
 - If the user asks a "why" ("mengapa") or "explain" ("jelaskan") question, they primarily want text. Set "wants_text" to true and likely "wants_table" to true, but "wants_chart" to false unless they mention a trend.
 - If the user asks for a "trend" ("tren") or "comparison" ("bandingkan") without specifying "only", they want all three components (text, chart, table).
 - For all other general performance questions, assume they want text and table, but not a chart.
-- If "sederhanakan" is mentioned, "wants_simplified_numbers" should be true, in addition to any other components requested.
 
 User Query: "{user_query}"
 '''
