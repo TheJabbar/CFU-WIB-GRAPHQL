@@ -299,6 +299,25 @@ async def get_insight_logic(
 ) -> Dict[str, Any]:
     """Main agent logic. Handles table selection, SQL execution, insight generation, and optional chart/data output."""
     table_name, instruction_prompt, prompt_name_for_chart = await select_table_and_prompt(query)
+
+    if prompt_name_for_chart == "Greeting or General Question":
+        logger.info("Handling a greeting or general question, bypassing data pipeline.")
+        
+        # Use a simple LLM call that fits the prompt format
+        greeting_response = await telkomllm_generate_topic(
+            prompt=instruction_prompt,  
+            user_query=query
+        )
+        
+        return {
+            "output": str(greeting_response),
+            "chart": None,
+            "chart_type": None,
+            "chart_library": None,
+            "data_columns": [],
+            "data_rows": []
+        }
+    
     column_list, first_row = get_schema_and_sample(table_name)
 
     insight_text = ""

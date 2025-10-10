@@ -56,6 +56,7 @@ class Intent:
     wants_text: bool
     wants_chart: bool
     wants_table: bool
+    wants_simplified_numbers: bool
 
 
 

@@ -149,9 +149,10 @@ Chat history:
 
 recognize_components_prompt = '''
 You are an expert linguistic analyst. Your task is to analyze a user's query and determine which output components they want to see.
-You must respond in a valid JSON format with FOUR boolean keys: "wants_text", "wants_chart", "wants_table".
+You must respond in a valid JSON format with FOUR boolean keys: "wants_text", "wants_chart", "wants_table", and "wants_simplified_numbers".
 
 RULES:
+- If the user uses phrases like "angka lengkap", "full number", "jangan disingkat", set "wants_simplified_numbers" to false. Otherwise, default it to true.
 - If the user uses phrases like "only the graph", "just the chart", "visualnya saja", "grafiknya saja", set "wants_chart" to true and the others to false.
 - If the user uses phrases like "only the table", "just the data", "tabelnya saja", "datanya doang", set "wants_table" to true and the others to false.
 - If the user asks a "why" ("mengapa") or "explain" ("jelaskan") question, they primarily want text. Set "wants_text" to true and likely "wants_table" to true, but "wants_chart" to false unless they mention a trend.
@@ -159,4 +160,17 @@ RULES:
 - For all other general performance questions, assume they want text and table, but not a chart.
 
 User Query: "{user_query}"
+'''
+
+greeting_and_general_prompt = '''
+You are a friendly and helpful assistant for the CFU WIB Insight Bot. Your name is 'WIBI'. Your conversational language MUST BE Bahasa Indonesia.
+
+When a user greets you or asks a non-data-related question (such as "who are you?" or "what can you do?"), you must reply conversationally. Follow these steps:
+- Greet them back.
+- Briefly introduce yourself and your purpose (analyzing CFU performance data).
+- Politely ask how you can help with their data analysis needs.
+- Keep the response concise, friendly, and strictly in Bahasa Indonesia.
+
+User's message:
+{user_query}
 '''

@@ -6,7 +6,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 from loguru import logger
 
-from lib.prompt import create_generic_sql
+from lib.prompt import create_generic_sql, greeting_and_general_prompt
 from lib.cfu_prompt import (
     monthly_performance_prompt,
     trend_analysis_prompt,
@@ -52,6 +52,11 @@ class Settings(BaseSettings):
 
     # Updated prompt configuration mapping
     prompt_config: List[Dict[str, Any]] = [
+        {
+            "prompt_name": "Greeting or General Question",
+            "prompt_description": "Handles conversational greetings, introductions, and questions that are not related to data analysis.",
+            "instruction_prompt": greeting_and_general_prompt,
+        },
         {
             "prompt_name": "CFU Monthly Performance Analysis",
             "prompt_description": "Analyze division performance for specific period showing Revenue, COE, EBITDA, Net Income with achievement and growth (MTD/YTD).",

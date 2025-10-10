@@ -16,6 +16,8 @@ API_URL = os.getenv("API_URL")
 API_KEY = os.getenv("X_API_KEY")
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120.0"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", None)
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", None)
 
 # Basic authentication for Chainlit
 @cl.password_auth_callback
@@ -90,10 +92,17 @@ def format_number_simplified(num: Any) -> str:
     return f"{num:,.0f}"
 
 
-def format_insight_text(text: str, formatter: Callable[[Any], str]) -> str:
+def format_number_full(num: Any) -> str:
+    """Formats numbers with thousand separators, without simplification."""
+    if not isinstance(num, (int, float)):
+        return str(num)
+    return f"{num:,.0f}"
+
+
+def format_insight_text(text: str, formatter: Optional[Callable[[Any], str]]) -> str:
     """Find numbers in text and replace them using a custom formatter."""
-    if not text:
-        return ""
+    if not text or not formatter:
+        return text
 
     def replace_number(match):
         num_str = match.group(0).replace(",", "")
@@ -101,8 +110,8 @@ def format_insight_text(text: str, formatter: Callable[[Any], str]) -> str:
             number = float(num_str)
             if number.is_integer():
                 number = int(number)
-            
-            return formatter(number) if abs(number) >= 1_000_000 else match.group(0)
+            # Apply the passed formatter unconditionally
+            return formatter(number)
         except (ValueError, TypeError):
             return match.group(0)
 
@@ -165,6 +174,7 @@ async def recognize_user_intent(user_query: str) -> Dict[str, bool]:
                 wantsText
                 wantsChart
                 wantsTable
+                wantsSimplifiedNumbers
             }
         }
     """
@@ -176,14 +186,16 @@ async def recognize_user_intent(user_query: str) -> Dict[str, bool]:
         return {
             "wants_text": intent_data.get("wantsText", True),
             "wants_chart": intent_data.get("wantsChart", False),
-            "wants_table": intent_data.get("wantsTable", True)
+            "wants_table": intent_data.get("wantsTable", True),
+            "wants_simplified_numbers": intent_data.get("wantsSimplifiedNumbers", True)
         }
     except Exception:
         # Fallback when recognizer fails
         return {
             "wants_text": True,
             "wants_chart": False,
-            "wants_table": True
+            "wants_table": True,
+            "wants_simplified_numbers": True
         }
 
 async def make_insight_request(user_query: str, chat_history: str, intent: Dict[str, bool]):
@@ -266,11 +278,11 @@ async def main(message: cl.Message):
         data_columns = insight_data.get("dataColumns", [])
         
         # Choose formatter depending on intent
-        formatter = format_number_simplified
+        formatter = format_number_simplified if intent.get("wants_simplified_numbers", True) else format_number_full
         
         # Format table and text if available
         table_md = rows_to_markdown_table(data_rows, data_columns, formatter=formatter) if data_rows else ""
-        formatted_answer = format_insight_text(answer, formatter) if answer and formatter else answer
+        formatted_answer = format_insight_text(answer, formatter) if answer else answer
         
         # Store raw data for potential reformatting
         cacheable_data = {
@@ -342,4 +354,4 @@ async def main(message: cl.Message):
 async def end_chat():
     """Clean up when the user ends the chat."""
     sess: ChatSession = cl.user_session.get("chat_session")
-    _debug(f"Chat session ended. conversation_id={getattr(sess, 'conversation_id', 'N/A')}")
+    _debug(f"Chat session ended. conversation_id={getattr(sess, 'conversation_id', 'N/A')}")    
