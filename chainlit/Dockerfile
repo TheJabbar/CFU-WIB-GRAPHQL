@@ -18,7 +18,7 @@ COPY app.py ./
 COPY .env ./
 
 # Expose the port
-EXPOSE 7899
+EXPOSE 8899
 
 # Run the Chainlit application
-CMD ["/bin/bash", "-c", "source .venv/bin/activate && chainlit run app.py --port 7899 --host 0.0.0.0"]
+CMD ["/bin/bash", "-c", "source .venv/bin/activate && chainlit run app.py --port 8899 --host 0.0.0.0"]

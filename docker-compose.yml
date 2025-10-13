@@ -6,12 +6,11 @@ services:
       dockerfile: Dockerfile
     container_name: cfu-wib-bot
     ports:
-      - 8123:8123
+      - 5123:5123
     networks:
       - app-network
     volumes:
       - ./api/main.py:/app/main.py
-      - ./api/.env:/app/.env
       - ./api/lib:/app/lib
       - ./api/llm_engine.py:/app/llm_engine.py
       - ./api/config.py:/app/config.py
@@ -19,31 +18,27 @@ services:
       - ./api/security.py:/app/security.py
       - ./api/utils.py:/app/utils.py
       - ./api/data:/app/data
-      - ./api/routes.py:/app/routes.py
-      - ./api/chart_generator.py:/app/chart_generator.py
-      - ./api/graphql_schema.py:/app/graphql_schema.py
     restart: unless-stopped
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
 
+  # Chainlit Service
   cfu-wib-chainlit:
     build:
       context: ./chainlit
       dockerfile: Dockerfile
     container_name: cfu-wib-chainlit
     ports:
-      - 7899:7899
+      - 8899:8899
     networks:
       - app-network
     volumes:
       - ./chainlit/app.py:/app/app.py
       - ./chainlit/.env:/app/.env
-      - ./chainlit/.chainlit/config.toml:/app/.chainlit/config.toml
     restart: unless-stopped
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
+    labels:
+      - "traefik.enable=true"
+      # - "traefik.http.routers.about.middlewares=basicauth"
+      - "traefik.http.routers.winscfuwibchatbot.rule=Host(`winscfuwibchatbot.dhiaul.my.id`)"
+      - "traefik.http.services.winscfuwibchatbot.loadbalancer.server.port=8899" 
 
 networks:
   app-network:
