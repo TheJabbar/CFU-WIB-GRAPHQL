@@ -7,7 +7,7 @@ CRITICAL USER MAPPING: When user says "unit", they mean "div" (division) in data
 
 Valid Values Reference:
 - DIV: ['CFU WIB', 'DMT', 'DWS', 'TELIN', 'TIF', 'TSAT', 'WINS']
-- PERIOD: [202501, 202502, 202503, 202504, 202505, 202506, 202507] (integers)
+- PERIOD: [202401,202402,..., 202501, 202502, 202503, 202504, 202505, 202506, 202507] (integers)
 - L2 Key Metrics: ['REVENUE', 'COE', 'EBITDA', 'NET INCOME']
 
 Rules:

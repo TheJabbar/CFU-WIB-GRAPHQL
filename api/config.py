@@ -45,8 +45,16 @@ class Settings(BaseSettings):
                 "Month-over-Month Growth (GMOM), Year-over-Year Growth (GYOY), Units, and "
                 "hierarchy category levels L0 through L6."
             ),
-            "source_file": "Format_Upload Radir_Sampel.xlsx",
-            "sheet_names": ["Jan25", "Feb25", "Mar25", "Apr25", "Mei25", "Jun25", "Jul25"],
+            "sources": [
+                {
+                    "file_name": "Format_Upload Radir_Sampel.xlsx",
+                    "sheet_names": ["Jan25", "Feb25", "Mar25", "Apr25", "Mei25", "Jun25", "Jul25"],
+                },
+                {
+                    "file_name": "Sampel_Upload Radir CFU WIB_2024.xlsx", 
+                    "sheet_names": ["012024", "022024", "032024", "042024", "052024", "062024", "072024", "082024", "092024", "102024", "112024", "122024"], 
+                }
+            ]
         }
     ]
 
