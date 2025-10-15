@@ -171,12 +171,19 @@ async def select_table_and_prompt(user_query: str) -> Tuple[str, str, str]:
         parsed = {"table_name": default_table, "prompt": default_prompt}
 
     table_name = parsed["table_name"]
+    prompt_name = parsed["prompt"]
+    instruction_prompt = settings.get_prompt_by_name(prompt_name)
+
+    # If the selected prompt is for greetings, we don't need a valid table.
+    if prompt_name == "Greeting or General Question":
+        return table_name, instruction_prompt, prompt_name
+
+    # For all other data-related prompts, a valid table name is required.
     valid_names = [c["table_name"] for c in settings.tables_config]
     if table_name not in valid_names:
         raise HTTPException(status_code=400, detail=f"Invalid table selected by LLM: {table_name}")
 
-    instruction_prompt = settings.get_prompt_by_name(parsed["prompt"])
-    return table_name, instruction_prompt, parsed["prompt"]
+    return table_name, instruction_prompt, prompt_name
 
 
 def get_schema_and_sample(table_name: str) -> Tuple[List[str], Dict[str, Any]]:
