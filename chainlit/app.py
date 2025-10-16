@@ -184,29 +184,29 @@ async def recognize_user_intent(user_query: str) -> Dict[str, bool]:
         intent_data = result.get("data", {}).get("recognizeIntent", {})
         # Normalize field names to snake_case for easier use in Python
         return {
-            "wants_text": intent_data.get("wantsText", True),
-            "wants_chart": intent_data.get("wantsChart", False),
-            "wants_table": intent_data.get("wantsTable", True),
-            "wants_simplified_numbers": intent_data.get("wantsSimplifiedNumbers", True)
+            "wantsText": intent_data.get("wantsText", True),
+            "wantsChart": intent_data.get("wantsChart", False),
+            "wantsTable": intent_data.get("wantsTable", True),
+            "wantsSimplifiedNumbers": intent_data.get("wantsSimplifiedNumbers", True),
         }
     except Exception:
         # Fallback when recognizer fails
         return {
-            "wants_text": True,
-            "wants_chart": False,
-            "wants_table": True,
-            "wants_simplified_numbers": True
+            "wantsText": True,
+            "wantsChart": False,
+            "wantsTable": True,
+            "wantsSimplifiedNumbers": True,
         }
 
 async def make_insight_request(user_query: str, chat_history: str, intent: Dict[str, bool]):
     """Step 2: Build and execute the main insight query based on the recognized intent."""
     
     fields_to_request = []
-    if intent["wants_text"]:
+    if intent["wantsText"]:
         fields_to_request.append("output")
-    if intent["wants_chart"]:
+    if intent["wantsChart"]:
         fields_to_request.append("chart { chart, chartType, chartLibrary }")
-    if intent["wants_table"]:
+    if intent["wantsTable"]:
         fields_to_request.extend(["dataColumns", "dataRows"])
 
     # Default to output if nothing is explicitly requested
@@ -216,13 +216,20 @@ async def make_insight_request(user_query: str, chat_history: str, intent: Dict[
     fields_string = "\n".join(fields_to_request)
 
     graphql_query = f"""
-        query GetInsight($query: String!, $chatHistory: String!) {{
-            getInsight(query: $query, chatHistory: $chatHistory) {{
+        query GetInsight($query: String!, $chatHistory: String, $intent: IntentInput!) {{
+            getInsight(query: $query, chatHistory: $chatHistory, intent: $intent) {{
                 {fields_string}
             }}
         }}
     """
-    payload = {"query": graphql_query, "variables": {"query": user_query, "chatHistory": chat_history}}
+    payload = {
+        "query": graphql_query,
+        "variables": {
+            "query": user_query,
+            "chatHistory": chat_history,
+            "intent": intent  # <-- Kirim dictionary intent
+        }
+    }
     return await _post_json_with_retry(f"{API_URL}/cfu-insight", payload)
 
 
@@ -278,7 +285,7 @@ async def main(message: cl.Message):
         data_columns = insight_data.get("dataColumns", [])
         
         # Choose formatter depending on intent
-        formatter = format_number_simplified if intent.get("wants_simplified_numbers", True) else format_number_full
+        formatter = format_number_simplified if intent.get("wantsSimplifiedNumbers", True) else format_number_full
         
         # Format table and text if available
         table_md = rows_to_markdown_table(data_rows, data_columns, formatter=formatter) if data_rows else ""

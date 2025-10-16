@@ -2,6 +2,8 @@ from typing import List, Dict, Any, Optional, Tuple
 import json
 import time
 import re
+from datetime import datetime
+import pytz
 from fastapi import HTTPException
 from fastapi.security.api_key import APIKey
 from loguru import logger
@@ -18,6 +20,7 @@ from llm_engine import (
     telkomllm_fix_sql,
     telkomllm_generate_topic,
     telkomllm_generate_recommendation_question,
+    telkomllm_greeting_and_general
 )
 
 from lib.prompt import (
@@ -284,11 +287,20 @@ async def execute_sql_query(generated_sql: str, columns_list: List[str]) -> List
 
 
 async def generate_insight(table_name: str, columns_list: List[str], table_data: List[Dict[str, Any]],
-                           user_query: str, instruction_prompt: str) -> str:
+                           user_query: str, instruction_prompt: str, intent: Dict[str, bool]) -> str:
     """Use LLM to generate textual insight from query results."""
     t0 = time.monotonic()
+
+    if intent.get("wants_simplified_numbers", True):
+        number_format_instruction = "Gunakan format sederhana (contoh: Rp5.025,1 Miliar, bukan Rp5,03 Triliun)."
+    else:
+        number_format_instruction = "Gunakan angka lengkap tanpa singkatan (contoh: 5.025.100.000.000)."
+    
+    # Masukkan instruksi format ke dalam prompt
+    final_prompt = generate_insight_prompt.replace('{number_format_instruction}', number_format_instruction)
+
     insight = await telkomllm_infer_sql(
-        prompt=generate_insight_prompt,
+        prompt=final_prompt, 
         user_query=user_query,
         table_name=table_name,
         instruction_prompt=instruction_prompt,
@@ -302,17 +314,23 @@ async def generate_insight(table_name: str, columns_list: List[str], table_data:
 async def get_insight_logic(
     query: str,
     chat_history: Optional[str],
-    requested_fields: List[str]
+    requested_fields: List[str],
+    intent: Dict[str, bool]
 ) -> Dict[str, Any]:
     """Main agent logic. Handles table selection, SQL execution, insight generation, and optional chart/data output."""
     table_name, instruction_prompt, prompt_name_for_chart = await select_table_and_prompt(query)
 
     if prompt_name_for_chart == "Greeting or General Question":
         logger.info("Handling a greeting or general question, bypassing data pipeline.")
-        
-        # Use a simple LLM call that fits the prompt format
-        greeting_response = await telkomllm_generate_topic(
-            prompt=instruction_prompt,  
+
+        # Get the current time in Jakarta (WIB) time zone
+        jakarta_tz = pytz.timezone("Asia/Jakarta")
+        current_time_str = datetime.now(jakarta_tz).strftime('%A, %d %B %Y, %H:%M %Z')
+        time_aware_prompt = instruction_prompt.replace('{current_time}', current_time_str)
+
+        # call LLM for greeting and general question
+        greeting_response = await telkomllm_greeting_and_general(
+            prompt=time_aware_prompt,  
             user_query=query
         )
         
@@ -338,12 +356,22 @@ async def get_insight_logic(
             agent_state["final_answer"] = insight_text or "No insights available."
             break
 
-        agent_state = await execute_agent_step(
-            agent_prompt_text=agent_prompt,
-            query=agent_state["action_input"],
-            chat_history=chat_history,
-            tools_answer=insight_text
-        )
+        # Check whether the previous step has produced an answer. If yeas, skip the LLM call and proceed directly to finalization.
+        if insight_text:
+            logger.debug("[Agentic] Insight text is ready. Bypassing final agent call.")
+            agent_state = {
+                "action": "Final Answer",
+                "action_input": "",
+                "final_answer": insight_text
+            }
+        else:
+            # If nope, run the agent step as usual for planning.
+            agent_state = await execute_agent_step(
+                agent_prompt_text=agent_prompt,
+                query=agent_state["action_input"],
+                chat_history=chat_history,
+                tools_answer=insight_text
+            )
         logger.debug(f"[Agentic] Step {step_count+1} state: {agent_state}")
 
         if agent_state["action"] == "Final Answer":
@@ -368,7 +396,8 @@ async def get_insight_logic(
                 columns_list=column_list,
                 table_data=rows,
                 user_query=query,
-                instruction_prompt=instruction_prompt
+                instruction_prompt=instruction_prompt,
+                intent=intent
             )
         else:
             insight_text = "Data successfully retrieved from the database."

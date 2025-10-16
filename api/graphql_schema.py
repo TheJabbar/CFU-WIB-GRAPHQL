@@ -59,6 +59,14 @@ class Intent:
     wants_simplified_numbers: bool
 
 
+@strawberry.input
+class IntentInput:
+    """GraphQL input type for passing recognized intent."""
+    wants_text: bool
+    wants_chart: bool
+    wants_table: bool
+    wants_simplified_numbers: bool
+
 
 # 2. DEFINE THE MAIN QUERY & RESOLVERS
 
@@ -66,7 +74,7 @@ class Intent:
 class Query:
 
     @strawberry.field
-    async def get_insight(self, info: Info, query: str, chat_history: Optional[str] = None) -> InsightResponse:
+    async def get_insight(self, info: Info, query: str, chat_history: Optional[str] = None, intent: Optional[IntentInput] = None) -> InsightResponse:
         """
         Resolver for generating insights.
         
@@ -76,6 +84,19 @@ class Query:
         3. Return a structured InsightResponse containing text, chart, and/or raw data.
         """
         logger.info(f"GraphQL get_insight called with query: '{query}'")
+
+        if not intent:
+            logger.warning("Intent not provided by client, recognizing fallback intent...")
+            intent_dict = await get_intent_logic(query)
+        else:
+            intent_dict = {
+                "wants_text": intent.wants_text,
+                "wants_chart": intent.wants_chart,
+                "wants_table": intent.wants_table,
+                "wants_simplified_numbers": intent.wants_simplified_numbers,
+            }
+        
+        logger.info(f"Recognized intent: {intent_dict}")
         
         # 1. Inspect requested fields (text, chart, data table, etc.)
         requested_fields = {field.name for field in info.selected_fields[0].selections}
@@ -85,7 +106,8 @@ class Query:
         result_dict = await get_insight_logic(
             query=query,
             chat_history=chat_history,
-            requested_fields=list(requested_fields)
+            requested_fields=list(requested_fields),
+            intent=intent_dict  
         )
 
         # 3. Wrap chart data if it exists
