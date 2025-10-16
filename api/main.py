@@ -51,10 +51,10 @@ app.add_middleware(
 # GraphQL router setup with WebSocket support for subscriptions
 graphql_app = GraphQLRouter(
     schema,
-    graphiql=True,  # Enable GraphiQL interface for debugging
+    graphiql=True, 
     subscription_protocols=[
-        "graphql-transport-ws",  # Apollo subscription protocol
-        "graphql-ws"  # Legacy protocol for backwards compatibility
+        "graphql-transport-ws",  
+        "graphql-ws" 
     ]
 )
 

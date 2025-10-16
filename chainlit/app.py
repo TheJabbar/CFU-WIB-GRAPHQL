@@ -10,7 +10,6 @@ from typing import Dict, Any, List, Optional, Callable
 import re
 from gql import gql, Client
 from gql.transport.websockets import WebsocketsTransport
-from gql.transport.aiohttp import AIOHTTPTransport
 
 load_dotenv()
 
@@ -114,7 +113,6 @@ def format_insight_text(text: str, formatter: Optional[Callable[[Any], str]]) ->
             number = float(num_str)
             if number.is_integer():
                 number = int(number)
-            # Apply the passed formatter unconditionally
             return formatter(number)
         except (ValueError, TypeError):
             return match.group(0)
@@ -142,7 +140,15 @@ def rows_to_markdown_table(
         values = []
         for col in columns:
             val = row.get(col, "")
-            if formatter and isinstance(val, (int, float)) and col.lower() != "period":
+            # Skip formatting for period column
+            if col.lower() == "period":
+                values.append(str(val))
+            # Check if column is percentage/achievement (has 'pct', 'ach', 'gmom', 'gyoy', etc.)
+            elif isinstance(val, (int, float)) and any(keyword in col.lower() for keyword in ['pct', 'ach', 'gmom', 'gyoy', 'growth', 'achievement']):
+                # Format percentages with 2 decimal places
+                values.append(f"{val:.2f}%")
+            # Apply number formatter for other numeric columns
+            elif formatter and isinstance(val, (int, float)):
                 values.append(formatter(val))
             else:
                 values.append(str(val))
@@ -171,7 +177,7 @@ async def _post_json_with_retry(url: str, payload: dict) -> dict:
 
 # API calls
 async def recognize_user_intent(user_query: str) -> Dict[str, bool]:
-    """Step 1: Call the lightweight intent recognizer agent."""
+    """Call the intent recognizer agent."""
     graphql_query = """
         query RecognizeIntent($query: String!) {
             recognizeIntent(query: $query) {
@@ -186,7 +192,6 @@ async def recognize_user_intent(user_query: str) -> Dict[str, bool]:
     try:
         result = await _post_json_with_retry(f"{API_URL}/cfu-insight", payload)
         intent_data = result.get("data", {}).get("recognizeIntent", {})
-        # Normalize field names to snake_case for easier use in Python
         return {
             "wantsText": intent_data.get("wantsText", True),
             "wantsChart": intent_data.get("wantsChart", False),
@@ -194,7 +199,6 @@ async def recognize_user_intent(user_query: str) -> Dict[str, bool]:
             "wantsSimplifiedNumbers": intent_data.get("wantsSimplifiedNumbers", True),
         }
     except Exception:
-        # Fallback when recognizer fails
         return {
             "wantsText": True,
             "wantsChart": False,
@@ -202,26 +206,23 @@ async def recognize_user_intent(user_query: str) -> Dict[str, bool]:
             "wantsSimplifiedNumbers": True,
         }
 
-async def make_insight_request(user_query: str, chat_history: str, intent: Dict[str, bool], request_id: str):
-    """Step 2: Build and execute the main insight query based on the recognized intent."""
+async def make_insight_request(user_query: str, chat_history: str, request_id: str):
+    """
+    Build and execute the main insight query.
+    """
     
-    fields_to_request = []
-    if intent["wantsText"]:
-        fields_to_request.append("output")
-    if intent["wantsChart"]:
-        fields_to_request.append("chart { chart, chartType, chartLibrary }")
-    if intent["wantsTable"]:
-        fields_to_request.extend(["dataColumns", "dataRows"])
-
-    # Default to output if nothing is explicitly requested
-    if not fields_to_request:
-        fields_to_request.append("output")
-        
+    fields_to_request = [
+        "output",
+        "chart { chart, chartType, chartLibrary }",
+        "dataColumns",
+        "dataRows",
+        "intent { wantsText, wantsChart, wantsTable, wantsSimplifiedNumbers }"
+    ]
     fields_string = "\n".join(fields_to_request)
 
     graphql_query = f"""
-        query GetInsight($query: String!, $requestId: String!, $chatHistory: String, $intent: IntentInput!) {{
-            getInsight(query: $query, requestId: $requestId, chatHistory: $chatHistory, intent: $intent) {{
+        query GetInsight($query: String!, $requestId: String!, $chatHistory: String) {{
+            getInsight(query: $query, requestId: $requestId, chatHistory: $chatHistory) {{
                 {fields_string}
             }}
         }}
@@ -232,11 +233,9 @@ async def make_insight_request(user_query: str, chat_history: str, intent: Dict[
             "query": user_query,
             "requestId": request_id,
             "chatHistory": chat_history,
-            "intent": intent  # <-- Kirim dictionary intent
         }
     }
     return await _post_json_with_retry(f"{API_URL}/cfu-insight", payload)
-
 
 async def subscribe_to_progress(request_id: str, progress_step: cl.Step):
     """Subscribe to progress updates via GraphQL WebSocket and update step name dynamically."""
@@ -263,11 +262,9 @@ async def subscribe_to_progress(request_id: str, progress_step: cl.Step):
                 status = update.get("status", "")
                 message = update.get("message", "")
 
-                # Update the step NAME (not output) - this changes the single line display
                 progress_step.name = f"| {message}"
                 await progress_step.update()
                 
-                # Check if processing is complete
                 if status in ("completed", "error") and update.get("step") in ("complete", "error"):
                     break
                     
@@ -299,7 +296,7 @@ async def start_chat():
 
 @cl.on_message
 async def main(message: cl.Message):
-    """Main message handler (insight + optional post-analysis)."""
+    """Main message handler with a simplified, single-API-call flow."""
     user_query = message.content.strip()
     if not user_query:
         await cl.Message(content="Mohon masukkan pertanyaan yang valid.").send()
@@ -308,21 +305,14 @@ async def main(message: cl.Message):
     chat_session: ChatSession = cl.user_session.get("chat_session")
     request_id = str(uuid.uuid4())
 
-    # Create a single progress step - the NAME will update dynamically (not output)
-    async with cl.Step(name=" | Menganalisis pertanyaan yang sedang diajukan...", type="run") as progress_step:
+    async with cl.Step(name=" | Menganalisis pertanyaan Anda...", type="run") as progress_step:
         
         try:
-            # Start subscription in background
             progress_task = asyncio.create_task(subscribe_to_progress(request_id, progress_step))
             
-            # Step 1: Recognize intent (including format requests)
-            intent = await recognize_user_intent(user_query)
-            
-            # Step 2: Call main agent with optimized query
             chat_history = chat_session.get_history_string(last_n=3)
-            insight_result = await make_insight_request(user_query, chat_history, intent, request_id)
+            insight_result = await make_insight_request(user_query, chat_history, request_id)
 
-            # Wait for progress subscription to complete
             await progress_task
             
         except Exception as e:
@@ -331,67 +321,70 @@ async def main(message: cl.Message):
             await cl.Message(content=f"❌ Terjadi kesalahan: {str(e)}").send()
             return
     
-    # Process results after progress step is closed
     try:
+        insight_data = insight_result.get("data", {}).get("getInsight") # Cukup .get() tanpa default di sini
 
-        insight_data = insight_result.get("data", {}).get("getInsight", {})
         if not insight_data:
-            await cl.Message(content="Maaf, saya tidak dapat menghasilkan output untuk permintaan tersebut.").send()
+            await cl.Message(content="Maaf, saya tidak dapat menghasilkan output untuk permintaan tersebut. Respons dari server kosong.").send()
             return
 
         answer = insight_data.get("output")
         data_rows = insight_data.get("dataRows", [])
         data_columns = insight_data.get("dataColumns", [])
-        
-        # Choose formatter depending on intent
-        formatter = format_number_simplified if intent.get("wantsSimplifiedNumbers", True) else format_number_full
-        
-        # Format table and text if available
+        chart_info = insight_data.get("chart")
+        intent_from_backend = insight_data.get("intent") or {}  # PERBAIKAN: Default ke {} jika None
+
+        if not intent_from_backend.get("wantsSimplifiedNumbers", True):
+            formatter = format_number_full
+        else:
+            formatter = format_number_simplified
+
         table_md = rows_to_markdown_table(data_rows, data_columns, formatter=formatter) if data_rows else ""
         formatted_answer = format_insight_text(answer, formatter) if answer else answer
         
-        # Store raw data for potential reformatting
         cacheable_data = {
             "output": answer,
             "data_rows": data_rows,
             "data_columns": data_columns,
-            "chart": insight_data.get("chart", {}).get("chart"),
-            "chart_type": insight_data.get("chart", {}).get("chartType"),
-            "chart_library": insight_data.get("chart", {}).get("chartLibrary"),
+            "chart": chart_info.get("chart") if isinstance(chart_info, dict) else None,
+            "chart_type": chart_info.get("chartType") if isinstance(chart_info, dict) else None,
+            "chart_library": chart_info.get("chartLibrary") if isinstance(chart_info, dict) else None,
         }
         chat_session.last_response_data = cacheable_data
 
-        # Assemble final content
+        # Check the intent from the backend to understand what the user wants.
+        wants_text = intent_from_backend.get("wantsText", True)
+        wants_table = intent_from_backend.get("wantsTable", True)
+        
         content_parts = []
-        if table_md:
+        
+        # Only display the table if the user requests it AND data is available.
+        if wants_table and table_md:
             content_parts.append(table_md)
-        if formatted_answer:
+        
+        # Only display text if the user requests it AND output is available.
+        if wants_text and formatted_answer:
             content_parts.append(formatted_answer)
         
         final_content = "\n\n".join(content_parts) or "Berhasil mengambil data, namun tidak ada output teks atau tabel untuk ditampilkan."
 
-        # Add chart if available
         elements = []
-        chart_info = insight_data.get("chart")
-        if chart_info and chart_info.get("chart"):
+        if isinstance(chart_info, dict) and chart_info.get("chart"):
             try:
                 fig = go.Figure(json.loads(chart_info["chart"]))
                 elements.append(cl.Plotly(figure=fig, display="inline"))
             except Exception as chart_e:
                 final_content += f"\n\n*❌ Gagal menampilkan grafik: {str(chart_e)}*"
 
-        # If only a chart is present, keep content empty
         if elements and not content_parts:
             final_content = ""
 
-        # Send final result as a new message
         result_msg = cl.Message(content=final_content, elements=elements)
         await result_msg.send()
 
-        # Update history with the plain text answer
-        chat_session.add_to_history(user_query, answer)
+        chat_session.add_to_history(user_query, answer or "")
 
-        # Step 3: Background post-analysis (topic & recommendations)
+        # Background post-analysis (topic & recommendations)
         updated_chat_history = chat_session.get_history_string(last_n=3)
 
         async def post_analysis_task():

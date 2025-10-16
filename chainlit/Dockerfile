@@ -17,6 +17,10 @@ RUN uv venv && \
 COPY app.py ./
 COPY .env ./
 
+# Copy Chainlit configuration
+COPY .chainlit/ ./.chainlit/
+COPY chainlit.md ./
+
 # Expose the port
 EXPOSE 8899
 
