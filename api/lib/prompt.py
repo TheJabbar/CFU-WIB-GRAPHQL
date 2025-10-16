@@ -204,6 +204,8 @@ Whatever the greeting, provide examples of recommended questions that can be ask
 - "Bagaimana trend Revenue/COE/EBITDA/NET INCOME unit [unit] untuk periode [bulan, tahun] sampai [bulan, tahun]?"
 - "Tampilkan trend perbandingaan actual, target dan prev year untuk Revenue/COE/EBITDA/NET INCOME unit [unit] untuk periode [bulan, tahun] sampai [bulan, tahun]"
 
+Unit examples: DWS, CFU WIB, WINS, dll
+
 User's message:
 {user_query}
 '''

@@ -8,11 +8,15 @@ import json
 import plotly.graph_objects as go
 from typing import Dict, Any, List, Optional, Callable
 import re
+from gql import gql, Client
+from gql.transport.websockets import WebsocketsTransport
+from gql.transport.aiohttp import AIOHTTPTransport
 
 load_dotenv()
 
 # Application settings
 API_URL = os.getenv("API_URL")
+API_WS_URL = os.getenv("API_WS_URL", API_URL.replace("http://", "ws://").replace("https://", "wss://") if API_URL else None)
 API_KEY = os.getenv("X_API_KEY")
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120.0"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
@@ -198,7 +202,7 @@ async def recognize_user_intent(user_query: str) -> Dict[str, bool]:
             "wantsSimplifiedNumbers": True,
         }
 
-async def make_insight_request(user_query: str, chat_history: str, intent: Dict[str, bool]):
+async def make_insight_request(user_query: str, chat_history: str, intent: Dict[str, bool], request_id: str):
     """Step 2: Build and execute the main insight query based on the recognized intent."""
     
     fields_to_request = []
@@ -216,8 +220,8 @@ async def make_insight_request(user_query: str, chat_history: str, intent: Dict[
     fields_string = "\n".join(fields_to_request)
 
     graphql_query = f"""
-        query GetInsight($query: String!, $chatHistory: String, $intent: IntentInput!) {{
-            getInsight(query: $query, chatHistory: $chatHistory, intent: $intent) {{
+        query GetInsight($query: String!, $requestId: String!, $chatHistory: String, $intent: IntentInput!) {{
+            getInsight(query: $query, requestId: $requestId, chatHistory: $chatHistory, intent: $intent) {{
                 {fields_string}
             }}
         }}
@@ -226,11 +230,51 @@ async def make_insight_request(user_query: str, chat_history: str, intent: Dict[
         "query": graphql_query,
         "variables": {
             "query": user_query,
+            "requestId": request_id,
             "chatHistory": chat_history,
             "intent": intent  # <-- Kirim dictionary intent
         }
     }
     return await _post_json_with_retry(f"{API_URL}/cfu-insight", payload)
+
+
+async def subscribe_to_progress(request_id: str, progress_step: cl.Step):
+    """Subscribe to progress updates via GraphQL WebSocket and update step name dynamically."""
+    subscription_query = gql("""
+        subscription ProgressUpdates($requestId: String!) {
+            progressUpdates(requestId: $requestId) {
+                requestId
+                step
+                status
+                message
+                timestamp
+                details
+            }
+        }
+    """)
+    
+    try:
+        transport = WebsocketsTransport(url=f"{API_WS_URL}/cfu-insight")
+        async with Client(transport=transport, fetch_schema_from_transport=False) as session:
+            
+            async for result in session.subscribe(subscription_query, variable_values={"requestId": request_id}):
+                update = result.get("progressUpdates", {})
+                
+                status = update.get("status", "")
+                message = update.get("message", "")
+
+                # Update the step NAME (not output) - this changes the single line display
+                progress_step.name = f"| {message}"
+                await progress_step.update()
+                
+                # Check if processing is complete
+                if status in ("completed", "error") and update.get("step") in ("complete", "error"):
+                    break
+                    
+    except Exception as e:
+        _debug(f"Error in progress subscription: {e}")
+        progress_step.name = f"⚠️ Error: {str(e)}"
+        await progress_step.update()
 
 
 async def make_post_analysis_request(chat_history: str):
@@ -262,18 +306,33 @@ async def main(message: cl.Message):
         return
 
     chat_session: ChatSession = cl.user_session.get("chat_session")
+    request_id = str(uuid.uuid4())
 
-    # Initial loading message
-    loading_msg = cl.Message(content="Sedang memproses permintaan Anda...")
-    await loading_msg.send()
-
-    try:
-        # Step 1: Recognize intent (including format requests)
-        intent = await recognize_user_intent(user_query)
+    # Create a single progress step - the NAME will update dynamically (not output)
+    async with cl.Step(name=" | Menganalisis pertanyaan yang sedang diajukan...", type="run") as progress_step:
         
-        # Step 2: Call main agent with optimized query
-        chat_history = chat_session.get_history_string(last_n=3)
-        insight_result = await make_insight_request(user_query, chat_history, intent)
+        try:
+            # Start subscription in background
+            progress_task = asyncio.create_task(subscribe_to_progress(request_id, progress_step))
+            
+            # Step 1: Recognize intent (including format requests)
+            intent = await recognize_user_intent(user_query)
+            
+            # Step 2: Call main agent with optimized query
+            chat_history = chat_session.get_history_string(last_n=3)
+            insight_result = await make_insight_request(user_query, chat_history, intent, request_id)
+
+            # Wait for progress subscription to complete
+            await progress_task
+            
+        except Exception as e:
+            progress_step.name = f"❌ Error: {str(e)}"
+            await progress_step.update()
+            await cl.Message(content=f"❌ Terjadi kesalahan: {str(e)}").send()
+            return
+    
+    # Process results after progress step is closed
+    try:
 
         insight_data = insight_result.get("data", {}).get("getInsight", {})
         if not insight_data:
@@ -325,9 +384,9 @@ async def main(message: cl.Message):
         if elements and not content_parts:
             final_content = ""
 
-        loading_msg.content = final_content
-        loading_msg.elements = elements
-        await loading_msg.update()
+        # Send final result as a new message
+        result_msg = cl.Message(content=final_content, elements=elements)
+        await result_msg.send()
 
         # Update history with the plain text answer
         chat_session.add_to_history(user_query, answer)
@@ -353,8 +412,7 @@ async def main(message: cl.Message):
                 
     except Exception as e:
         error_msg = f"❌ Terjadi kesalahan saat memproses permintaan.\n\n**Error:** {str(e)}"
-        loading_msg.content = error_msg
-        await loading_msg.update()
+        await cl.Message(content=error_msg).send()
 
 
 @cl.on_chat_end

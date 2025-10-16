@@ -315,13 +315,27 @@ async def get_insight_logic(
     query: str,
     chat_history: Optional[str],
     requested_fields: List[str],
-    intent: Dict[str, bool]
+    intent: Dict[str, bool],
+    request_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """Main agent logic. Handles table selection, SQL execution, insight generation, and optional chart/data output."""
+    
+    # Helper function to emit progress
+    def emit(step: str, status: str, message: str, details: Optional[str] = None):
+        if request_id:
+            try:
+                from graphql_schema import emit_progress
+                emit_progress(request_id, step, status, message, details)
+            except ImportError:
+                pass
+    
+    emit("table_selection", "in_progress", "Memilih tabel dan prompt yang sesuai...")
     table_name, instruction_prompt, prompt_name_for_chart = await select_table_and_prompt(query)
+    emit("table_selection", "completed", f"Tabel terpilih: {table_name}")
 
     if prompt_name_for_chart == "Greeting or General Question":
         logger.info("Handling a greeting or general question, bypassing data pipeline.")
+        emit("greeting", "in_progress", "Memproses pertanyaan umum/salam...")
 
         # Get the current time in Jakarta (WIB) time zone
         jakarta_tz = pytz.timezone("Asia/Jakarta")
@@ -334,6 +348,8 @@ async def get_insight_logic(
             user_query=query
         )
         
+        emit("greeting", "completed", "Respon greeting berhasil dibuat")
+        
         return {
             "output": str(greeting_response),
             "chart": None,
@@ -343,7 +359,9 @@ async def get_insight_logic(
             "data_rows": []
         }
     
+    emit("schema", "in_progress", "Mengambil skema dan sample data...")
     column_list, first_row = get_schema_and_sample(table_name)
+    emit("schema", "completed", f"Skema tabel berhasil diambil ({len(column_list)} kolom)")
 
     insight_text = ""
     last_rows: List[Dict[str, Any]] = []
@@ -353,6 +371,7 @@ async def get_insight_logic(
     while agent_state["action"] != "Final Answer":
         if step_count >= MAX_AGENT_STEPS:
             logger.warning("[Agentic] Reached MAX_AGENT_STEPS. Forcing final answer.")
+            emit("agent", "completed", f"Mencapai batas maksimal iterasi ({MAX_AGENT_STEPS})")
             agent_state["final_answer"] = insight_text or "No insights available."
             break
 
@@ -366,18 +385,21 @@ async def get_insight_logic(
             }
         else:
             # If nope, run the agent step as usual for planning.
+            emit("agent", "in_progress", f"Menjalankan loop AI agentic")
             agent_state = await execute_agent_step(
                 agent_prompt_text=agent_prompt,
                 query=agent_state["action_input"],
                 chat_history=chat_history,
                 tools_answer=insight_text
             )
+            emit("agent", "completed", f"Agentic step #{step_count + 1} selesai - Action: {agent_state['action']}")
         logger.debug(f"[Agentic] Step {step_count+1} state: {agent_state}")
 
         if agent_state["action"] == "Final Answer":
             break
 
         action_input = agent_state.get("action_input") or query
+        emit("sql", "in_progress", "Membuat SQL query...")
         generated_sql = await generate_and_validate_sql(
             table_name=table_name,
             columns_list=column_list,
@@ -385,12 +407,17 @@ async def get_insight_logic(
             user_query=action_input,
             instruction_prompt=instruction_prompt
         )
+        emit("sql", "completed", "SQL query berhasil dibuat", details=generated_sql[:200])
+        
+        emit("query", "in_progress", "Menjalankan query ke database...")
         rows = await execute_sql_query(generated_sql, column_list)
+        emit("query", "completed", f"Query berhasil - {len(rows)} baris data ditemukan")
         last_rows = rows
 
         # Generate text insight only if explicitly requested
         if "output" in requested_fields:
             logger.info("Logic: Client requested text, generating insight...")
+            emit("insight", "in_progress", "Menghasilkan insight dari data...")
             insight_text = await generate_insight(
                 table_name=table_name,
                 columns_list=column_list,
@@ -399,6 +426,7 @@ async def get_insight_logic(
                 instruction_prompt=instruction_prompt,
                 intent=intent
             )
+            emit("insight", "completed", "Insight teks berhasil dibuat")
         else:
             insight_text = "Data successfully retrieved from the database."
 
@@ -410,14 +438,18 @@ async def get_insight_logic(
     chart_json, chart_library, chart_type = (None, None, None)
     if "chart" in requested_fields:
         logger.info("Logic: Client requested chart, checking eligibility...")
+        emit("chart", "in_progress", "Memeriksa kelayakan pembuatan chart...")
         if _should_generate_chart(prompt_name_for_chart, query, last_rows):
             chart_type = _determine_chart_type(prompt_name_for_chart, query)
+            emit("chart", "in_progress", f"Membuat chart tipe: {chart_type}...")
             chart_json = ChartGenerator.create_trend_chart(last_rows, chart_type)
             if chart_json:
                 logger.info("[Agentic] Chart generated via Plotly")
                 chart_library = "plotly"
+                emit("chart", "completed", f"Chart {chart_type} berhasil dibuat")
         else:
             logger.info("Chart skipped: not a trend request or insufficient data.")
+            emit("chart", "completed", "Chart tidak diperlukan untuk query ini")
 
     # Raw data if requested
     data_rows_to_send, data_columns_to_send = [], []

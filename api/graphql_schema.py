@@ -1,7 +1,9 @@
 import strawberry
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, AsyncGenerator
 from strawberry.types import Info
 from loguru import logger
+import asyncio
+from collections import defaultdict
 
 from routes import (
     get_intent_logic,
@@ -9,6 +11,10 @@ from routes import (
     get_topic_logic,
     get_recommendation_logic
 )
+
+# Progress tracking storage
+progress_storage: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+progress_subscribers: Dict[str, List[asyncio.Queue]] = defaultdict(list)
 
 
 # 1. DEFINE GRAPHQL DATA TYPES
@@ -68,64 +74,127 @@ class IntentInput:
     wants_simplified_numbers: bool
 
 
+@strawberry.type
+class ProgressUpdate:
+    """Real-time progress update from backend processing."""
+    request_id: str
+    step: str
+    status: str  # 'in_progress', 'completed', 'error'
+    message: str
+    timestamp: str
+    details: Optional[str] = None
+
+
+# Helper functions for progress tracking
+def emit_progress(request_id: str, step: str, status: str, message: str, details: Optional[str] = None):
+    """Emit progress update to all subscribers for this request_id."""
+    from datetime import datetime
+    
+    update = {
+        "request_id": request_id,
+        "step": step,
+        "status": status,
+        "message": message,
+        "timestamp": datetime.now().isoformat(),
+        "details": details
+    }
+    
+    # Store in history
+    progress_storage[request_id].append(update)
+    
+    # Notify subscribers
+    if request_id in progress_subscribers:
+        for queue in progress_subscribers[request_id]:
+            try:
+                queue.put_nowait(update)
+            except asyncio.QueueFull:
+                logger.warning(f"Queue full for request {request_id}, skipping update")
+
+
+def clear_progress(request_id: str):
+    """Clear progress history for a request."""
+    if request_id in progress_storage:
+        del progress_storage[request_id]
+    if request_id in progress_subscribers:
+        del progress_subscribers[request_id]
+
+
 # 2. DEFINE THE MAIN QUERY & RESOLVERS
 
 @strawberry.type
 class Query:
 
     @strawberry.field
-    async def get_insight(self, info: Info, query: str, chat_history: Optional[str] = None, intent: Optional[IntentInput] = None) -> InsightResponse:
+    async def get_insight(self, info: Info, query: str, request_id: str, chat_history: Optional[str] = None, intent: Optional[IntentInput] = None) -> InsightResponse:
         """
-        Resolver for generating insights.
+        Resolver for generating insights with progress tracking.
         
         Workflow:
         1. Detect which fields are being requested by the client.
         2. Call the core agentic logic with this context.
-        3. Return a structured InsightResponse containing text, chart, and/or raw data.
+        3. Emit progress updates throughout the process.
+        4. Return a structured InsightResponse containing text, chart, and/or raw data.
         """
-        logger.info(f"GraphQL get_insight called with query: '{query}'")
-
-        if not intent:
-            logger.warning("Intent not provided by client, recognizing fallback intent...")
-            intent_dict = await get_intent_logic(query)
-        else:
-            intent_dict = {
-                "wants_text": intent.wants_text,
-                "wants_chart": intent.wants_chart,
-                "wants_table": intent.wants_table,
-                "wants_simplified_numbers": intent.wants_simplified_numbers,
-            }
+        logger.info(f"GraphQL get_insight called with query: '{query}' and request_id: '{request_id}'")
         
-        logger.info(f"Recognized intent: {intent_dict}")
-        
-        # 1. Inspect requested fields (text, chart, data table, etc.)
-        requested_fields = {field.name for field in info.selected_fields[0].selections}
-        logger.info(f"Requested fields: {requested_fields}")
+        # Initialize progress
+        emit_progress(request_id, "init", "in_progress", "Memulai pemrosesan permintaan...")
 
-        # 2. Run the main agentic logic
-        result_dict = await get_insight_logic(
-            query=query,
-            chat_history=chat_history,
-            requested_fields=list(requested_fields),
-            intent=intent_dict  
-        )
+        try:
+            if not intent:
+                emit_progress(request_id, "intent", "in_progress", "Mengenali intent dari pertanyaan...")
+                logger.warning("Intent not provided by client, recognizing fallback intent...")
+                intent_dict = await get_intent_logic(query)
+                emit_progress(request_id, "intent", "completed", f"Intent berhasil dikenali: {'teks' if intent_dict.get('wants_text') else ''} {'grafik' if intent_dict.get('wants_chart') else ''} {'tabel' if intent_dict.get('wants_table') else ''}")
+            else:
+                intent_dict = {
+                    "wants_text": intent.wants_text,
+                    "wants_chart": intent.wants_chart,
+                    "wants_table": intent.wants_table,
+                    "wants_simplified_numbers": intent.wants_simplified_numbers,
+                }
+                emit_progress(request_id, "intent", "completed", "Intent diterima dari client")
+            
+            logger.info(f"Recognized intent: {intent_dict}")
+            
+            # 1. Inspect requested fields (text, chart, data table, etc.)
+            requested_fields = {field.name for field in info.selected_fields[0].selections}
+            logger.info(f"Requested fields: {requested_fields}")
 
-        # 3. Wrap chart data if it exists
-        chart_obj: Optional[Chart] = None
-        if result_dict.get("chart"):
-            chart_obj = Chart(
-                chart=result_dict.get("chart"),
-                chart_type=result_dict.get("chart_type"),
-                chart_library=result_dict.get("chart_library")
+            emit_progress(request_id, "processing", "in_progress", "Memproses insight dengan agentic workflow...")
+
+            # 2. Run the main agentic logic with progress tracking
+            result_dict = await get_insight_logic(
+                query=query,
+                chat_history=chat_history,
+                requested_fields=list(requested_fields),
+                intent=intent_dict,
+                request_id=request_id  # Pass request_id for progress tracking
             )
-        
-        # Return final GraphQL response
-        return InsightResponse(
-            output=result_dict.get("output"),
-            chart=chart_obj,
-            data_columns=result_dict.get("data_columns"),
-            data_rows=result_dict.get("data_rows")
-        )
+
+            # 3. Wrap chart data if it exists
+            chart_obj: Optional[Chart] = None
+            if result_dict.get("chart"):
+                emit_progress(request_id, "chart", "completed", "Grafik berhasil dibuat")
+                chart_obj = Chart(
+                    chart=result_dict.get("chart"),
+                    chart_type=result_dict.get("chart_type"),
+                    chart_library=result_dict.get("chart_library")
+                )
+            
+            emit_progress(request_id, "complete", "completed", "Pemrosesan selesai!")
+            
+            # Return final GraphQL response
+            return InsightResponse(
+                output=result_dict.get("output"),
+                chart=chart_obj,
+                data_columns=result_dict.get("data_columns"),
+                data_rows=result_dict.get("data_rows")
+            )
+        except Exception as e:
+            emit_progress(request_id, "error", "error", f"Terjadi kesalahan: {str(e)}")
+            logger.error(f"Error in get_insight: {e}")
+            raise
     
     @strawberry.field
     async def recognize_intent(self, query: str) -> Intent:
@@ -146,6 +215,66 @@ class Query:
         return RecommendationResponse(output=rec_text)
 
 
+@strawberry.type
+class Subscription:
+    """GraphQL Subscription for real-time progress updates."""
+    
+    @strawberry.subscription
+    async def progress_updates(self, request_id: str) -> AsyncGenerator[ProgressUpdate, None]:
+        """
+        Subscribe to real-time progress updates for a specific request.
+        
+        Usage:
+        subscription {
+            progressUpdates(requestId: "unique-request-id") {
+                requestId
+                step
+                status
+                message
+                timestamp
+                details
+            }
+        }
+        """
+        logger.info(f"Client subscribed to progress updates for request_id: {request_id}")
+        
+        # Create a queue for this subscriber
+        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        
+        # Register this subscriber
+        if request_id not in progress_subscribers:
+            progress_subscribers[request_id] = []
+        progress_subscribers[request_id].append(queue)
+        
+        try:
+            # Send any existing progress updates first
+            if request_id in progress_storage:
+                for update in progress_storage[request_id]:
+                    yield ProgressUpdate(**update)
+            
+            # Then stream new updates
+            while True:
+                update = await queue.get()
+                yield ProgressUpdate(**update)
+                
+                # If this is the final update, clean up
+                if update["status"] in ("completed", "error") and update["step"] in ("complete", "error"):
+                    break
+                    
+        except asyncio.CancelledError:
+            logger.info(f"Subscription cancelled for request_id: {request_id}")
+        finally:
+            # Clean up: remove this subscriber
+            if request_id in progress_subscribers:
+                try:
+                    progress_subscribers[request_id].remove(queue)
+                    if not progress_subscribers[request_id]:
+                        del progress_subscribers[request_id]
+                except ValueError:
+                    pass
+            logger.info(f"Client unsubscribed from progress updates for request_id: {request_id}")
+
+
 # 3. CREATE THE FINAL SCHEMA
 
-schema = strawberry.Schema(query=Query)
+schema = strawberry.Schema(query=Query, subscription=Subscription)
