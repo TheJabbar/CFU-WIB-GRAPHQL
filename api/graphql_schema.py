@@ -16,6 +16,9 @@ from routes import (
 progress_storage: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 progress_subscribers: Dict[str, List[asyncio.Queue]] = defaultdict(list)
 
+# Text streaming storage
+text_stream_subscribers: Dict[str, List[asyncio.Queue]] = defaultdict(list)
+
 
 # 1. DEFINE GRAPHQL DATA TYPES
 
@@ -86,6 +89,14 @@ class ProgressUpdate:
     details: Optional[str] = None
 
 
+@strawberry.type
+class InsightStreamChunk:
+    """Streaming chunk of insight text."""
+    request_id: str
+    chunk: str
+    is_final: bool = False
+
+
 # Helper functions for progress tracking
 def emit_progress(request_id: str, step: str, status: str, message: str, details: Optional[str] = None):
     """Emit progress update to all subscribers for this request_id."""
@@ -118,6 +129,16 @@ def clear_progress(request_id: str):
         del progress_storage[request_id]
     if request_id in progress_subscribers:
         del progress_subscribers[request_id]
+
+
+def emit_text_stream(request_id: str, chunk: str, is_final: bool = False):
+    """Emit streaming text chunk to all subscribers for this request_id."""
+    if request_id in text_stream_subscribers:
+        for queue in text_stream_subscribers[request_id]:
+            try:
+                queue.put_nowait({"chunk": chunk, "is_final": is_final})
+            except asyncio.QueueFull:
+                logger.warning(f"Text stream queue full for request {request_id}, skipping chunk")
 
 
 # 2. DEFINE THE MAIN QUERY & RESOLVERS
@@ -257,6 +278,56 @@ class Subscription:
                 except ValueError:
                     pass
             logger.info(f"Client unsubscribed from progress updates for request_id: {request_id}")
+    
+    @strawberry.subscription
+    async def insight_stream(self, request_id: str) -> AsyncGenerator[InsightStreamChunk, None]:
+        """
+        Subscribe to real-time streaming of insight text.
+        
+        Usage:
+        subscription {
+            insightStream(requestId: "unique-request-id") {
+                requestId
+                chunk
+                isFinal
+            }
+        }
+        """
+        logger.info(f"Client subscribed to insight stream for request_id: {request_id}")
+        
+        # Create a queue for this subscriber
+        queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        
+        # Register this subscriber
+        if request_id not in text_stream_subscribers:
+            text_stream_subscribers[request_id] = []
+        text_stream_subscribers[request_id].append(queue)
+        
+        try:
+            while True:
+                chunk_data = await queue.get()
+                yield InsightStreamChunk(
+                    request_id=request_id,
+                    chunk=chunk_data["chunk"],
+                    is_final=chunk_data.get("is_final", False)
+                )
+                
+                # If this is the final chunk, clean up
+                if chunk_data.get("is_final", False):
+                    break
+                    
+        except asyncio.CancelledError:
+            logger.info(f"Insight stream subscription cancelled for request_id: {request_id}")
+        finally:
+            # Clean up: remove this subscriber
+            if request_id in text_stream_subscribers:
+                try:
+                    text_stream_subscribers[request_id].remove(queue)
+                    if not text_stream_subscribers[request_id]:
+                        del text_stream_subscribers[request_id]
+                except ValueError:
+                    pass
+            logger.info(f"Client unsubscribed from insight stream for request_id: {request_id}")
 
 
 # 3. CREATE THE FINAL SCHEMA

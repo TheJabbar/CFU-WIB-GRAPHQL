@@ -28,6 +28,44 @@ async def make_async_api_call(url, token, payload):
             logger.error(f"Exception during API call: {e}")
             return {"error": str(e)}
 
+async def make_streaming_api_call(url, token, payload, callback):
+    """Make streaming API call and invoke callback for each chunk."""
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "x-api-key": token
+    }
+    
+    full_content = ""
+    async with httpx.AsyncClient(timeout=120.0, verify=False) as client:
+        try:
+            async with client.stream('POST', url, json=payload, headers=headers) as response:
+                if response.status_code == 200:
+                    async for line in response.aiter_lines():
+                        if line.startswith('data: '):
+                            chunk_data = line[6:]  # Remove 'data: ' prefix
+                            if chunk_data == '[DONE]':
+                                break
+                            try:
+                                import json
+                                chunk_json = json.loads(chunk_data)
+                                if 'choices' in chunk_json and len(chunk_json['choices']) > 0:
+                                    delta = chunk_json['choices'][0].get('delta', {})
+                                    content = delta.get('content', '')
+                                    if content:
+                                        full_content += content
+                                        await callback(content)
+                            except json.JSONDecodeError:
+                                continue
+                    return full_content
+                else:
+                    error_message = await response.aread()
+                    logger.error(f"Streaming API Error {response.status_code}: {error_message}")
+                    return {"error": f"Streaming failed with status {response.status_code}"}
+        except Exception as e:
+            logger.error(f"Exception during streaming API call: {e}")
+            return {"error": str(e)}
+
 async def telkomllm_select_table(prompt, tables_list, prompt_list, user_query):
     payload = {
         "model": "telkom-ai-instruct",
@@ -44,12 +82,16 @@ async def telkomllm_generate_sql(prompt, table_name, columns_list, first_row, us
     }
     return await make_async_api_call(URL_CUSTOM_LLM, TOKEN_CUSTOM_LLM, payload)
 
-async def telkomllm_infer_sql(prompt, user_query, table_name, instruction_prompt, column_list, table_data):
+async def telkomllm_infer_sql(prompt, user_query, table_name, instruction_prompt, column_list, table_data, stream=False, stream_callback=None):
     payload = {
         "model": "telkom-ai-instruct",
         "messages": [{"role": "system", "content": prompt.format(table_name=table_name, column_list=column_list, table_data=table_data, instruction_prompt=instruction_prompt, user_query=user_query)}],
-        "max_tokens": 28000, "temperature": 0, "stream": False
+        "max_tokens": 28000, "temperature": 0, "stream": stream
     }
+    
+    if stream and stream_callback:
+        return await make_streaming_api_call(URL_CUSTOM_LLM, TOKEN_CUSTOM_LLM, payload, stream_callback)
+    
     return await make_async_api_call(URL_CUSTOM_LLM, TOKEN_CUSTOM_LLM, payload)
 
 async def telkomllm_fix_sql(prompt, columns_list, error_sql, error_message):

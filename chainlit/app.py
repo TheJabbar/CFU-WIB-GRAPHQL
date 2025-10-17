@@ -274,6 +274,46 @@ async def subscribe_to_progress(request_id: str, progress_step: cl.Step):
         await progress_step.update()
 
 
+async def subscribe_to_insight_stream(request_id: str, streaming_msg: cl.Message):
+    """Subscribe to streaming insight text via GraphQL WebSocket."""
+    subscription_query = gql("""
+        subscription InsightStream($requestId: String!) {
+            insightStream(requestId: $requestId) {
+                requestId
+                chunk
+                isFinal
+            }
+        }
+    """)
+    
+    accumulated_text = ""
+    
+    try:
+        transport = WebsocketsTransport(url=f"{API_WS_URL}/cfu-insight")
+        async with Client(transport=transport, fetch_schema_from_transport=False) as session:
+            
+            async for result in session.subscribe(subscription_query, variable_values={"requestId": request_id}):
+                chunk_data = result.get("insightStream", {})
+                
+                chunk = chunk_data.get("chunk", "")
+                is_final = chunk_data.get("isFinal", False)
+                
+                if chunk:
+                    accumulated_text += chunk
+                    # Update message content in real-time
+                    streaming_msg.content = accumulated_text
+                    await streaming_msg.update()
+                
+                if is_final:
+                    break
+                    
+        return accumulated_text
+                    
+    except Exception as e:
+        _debug(f"Error in insight stream subscription: {e}")
+        return accumulated_text
+
+
 async def make_post_analysis_request(chat_history: str):
     """Request topic and recommendations after main insight."""
     graphql_query = """
@@ -310,10 +350,18 @@ async def main(message: cl.Message):
         try:
             progress_task = asyncio.create_task(subscribe_to_progress(request_id, progress_step))
             
+            # Create empty message for streaming text
+            streaming_msg = cl.Message(content="")
+            await streaming_msg.send()
+            
+            # Start insight stream subscription
+            stream_task = asyncio.create_task(subscribe_to_insight_stream(request_id, streaming_msg))
+            
             chat_history = chat_session.get_history_string(last_n=3)
             insight_result = await make_insight_request(user_query, chat_history, request_id)
 
             await progress_task
+            streamed_text = await stream_task
             
         except Exception as e:
             progress_step.name = f"❌ Error: {str(e)}"
@@ -356,31 +404,36 @@ async def main(message: cl.Message):
         wants_text = intent_from_backend.get("wantsText", True)
         wants_table = intent_from_backend.get("wantsTable", True)
         
-        content_parts = []
+        # Prepare table and chart elements
+        additional_content_parts = []
         
         # Only display the table if the user requests it AND data is available.
         if wants_table and table_md:
-            content_parts.append(table_md)
+            additional_content_parts.append(table_md)
         
-        # Only display text if the user requests it AND output is available.
-        if wants_text and formatted_answer:
-            content_parts.append(formatted_answer)
-        
-        final_content = "\n\n".join(content_parts) or "Berhasil mengambil data, namun tidak ada output teks atau tabel untuk ditampilkan."
-
         elements = []
         if isinstance(chart_info, dict) and chart_info.get("chart"):
             try:
                 fig = go.Figure(json.loads(chart_info["chart"]))
                 elements.append(cl.Plotly(figure=fig, display="inline"))
             except Exception as chart_e:
-                final_content += f"\n\n*❌ Gagal menampilkan grafik: {str(chart_e)}*"
-
-        if elements and not content_parts:
-            final_content = ""
-
-        result_msg = cl.Message(content=final_content, elements=elements)
-        await result_msg.send()
+                additional_content_parts.append(f"\n\n*❌ Gagal menampilkan grafik: {str(chart_e)}*")
+        
+        # Update the streaming message with table and chart
+        if additional_content_parts:
+            combined_content = streamed_text + "\n\n" + "\n\n".join(additional_content_parts)
+            streaming_msg.content = combined_content
+            streaming_msg.elements = elements
+            await streaming_msg.update()
+        elif elements:
+            streaming_msg.elements = elements
+            await streaming_msg.update()
+        
+        # If no streaming happened (e.g., greeting), send as regular message
+        if not streamed_text and formatted_answer:
+            final_content = "\n\n".join([table_md, formatted_answer] if table_md else [formatted_answer])
+            result_msg = cl.Message(content=final_content, elements=elements)
+            await result_msg.send()
 
         chat_session.add_to_history(user_query, answer or "")
 

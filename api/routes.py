@@ -287,7 +287,8 @@ async def execute_sql_query(generated_sql: str, columns_list: List[str]) -> List
 
 
 async def generate_insight(table_name: str, columns_list: List[str], table_data: List[Dict[str, Any]],
-                           user_query: str, instruction_prompt: str, intent: Dict[str, bool]) -> str:
+                           user_query: str, instruction_prompt: str, intent: Dict[str, bool], 
+                           stream: bool = False, stream_callback = None) -> str:
     """Use LLM to generate textual insight from query results."""
     t0 = time.monotonic()
 
@@ -304,7 +305,9 @@ async def generate_insight(table_name: str, columns_list: List[str], table_data:
         table_name=table_name,
         instruction_prompt=instruction_prompt,
         column_list=columns_list,
-        table_data=table_data
+        table_data=table_data,
+        stream=stream,
+        stream_callback=stream_callback
     )
     logger.debug(f"[Timing] generate_insight {(time.monotonic() - t0):.2f}s")
     return str(insight)
@@ -413,11 +416,31 @@ async def get_insight_logic(
 
         if "output" in requested_fields:
             emit("insight", "in_progress", "Menghasilkan insight dari data...")
+            
+            # Define streaming callback
+            async def stream_callback(chunk: str):
+                try:
+                    from graphql_schema import emit_text_stream
+                    emit_text_stream(request_id, chunk, is_final=False)
+                except ImportError:
+                    pass
+            
             insight_text = await generate_insight(
                 table_name=table_name, columns_list=column_list, table_data=rows,
                 user_query=action_input, instruction_prompt=instruction_prompt,
-                intent=intent_dict
+                intent=intent_dict,
+                stream=True if request_id else False,
+                stream_callback=stream_callback if request_id else None
             )
+            
+            # Emit final chunk
+            if request_id:
+                try:
+                    from graphql_schema import emit_text_stream
+                    emit_text_stream(request_id, "", is_final=True)
+                except ImportError:
+                    pass
+            
             emit("insight", "completed", "Insight teks berhasil dibuat")
         else:
             insight_text = "Data berhasil diambil."
