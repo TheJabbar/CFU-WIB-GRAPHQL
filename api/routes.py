@@ -363,24 +363,24 @@ async def get_insight_logic(
         jakarta_tz = pytz.timezone("Asia/Jakarta")
         current_time_str = datetime.now(jakarta_tz).strftime('%A, %d %B %Y, %H:%M %Z')
         time_aware_prompt = instruction_prompt.replace('{current_time}', current_time_str)
+        
+        # Streaming
+        async def stream_callback(chunk: str):
+            try:
+                from graphql_schema import emit_text_stream
+                emit_text_stream(request_id, chunk, is_final=False)
+            except ImportError:
+                pass
+        
         greeting_response = await telkomllm_greeting_and_general(
-            prompt=time_aware_prompt, user_query=completed_query
+            prompt=time_aware_prompt, 
+            user_query=completed_query,
+            stream=True if request_id else False,
+            stream_callback=stream_callback if request_id else None
         )
         
-        # Send greeting response as streaming text
+        # Send final chunk
         if request_id:
-            greeting_text = str(greeting_response)
-            # Split text into chunks for streaming effect
-            chunk_size = 10  # characters per chunk
-            for i in range(0, len(greeting_text), chunk_size):
-                chunk = greeting_text[i:i+chunk_size]
-                try:
-                    from graphql_schema import emit_text_stream
-                    emit_text_stream(request_id, chunk, is_final=False)
-                    await asyncio.sleep(0.01)  # Small delay for streaming effect
-                except ImportError:
-                    pass
-            # Send final chunk
             try:
                 from graphql_schema import emit_text_stream
                 emit_text_stream(request_id, "", is_final=True)

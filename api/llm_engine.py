@@ -126,10 +126,14 @@ async def telkomllm_generate_recommendation_question(prompt, chat_history: str):
     }
     return await make_async_api_call(URL_CUSTOM_LLM, TOKEN_CUSTOM_LLM, payload)
 
-async def telkomllm_greeting_and_general(prompt, user_query: str):
+async def telkomllm_greeting_and_general(prompt, user_query: str, stream=False, stream_callback=None):
     payload = {
         "model": "telkom-ai-instruct",
         "messages": [{"role": "system", "content": prompt.format(user_query=user_query)}],
-        "max_tokens": 2000, "temperature": 0, "stream": False
+        "max_tokens": 2000, "temperature": 0, "stream": stream
     }
+    
+    if stream and stream_callback:
+        return await make_streaming_api_call(URL_CUSTOM_LLM, TOKEN_CUSTOM_LLM, payload, stream_callback)
+    
     return await make_async_api_call(URL_CUSTOM_LLM, TOKEN_CUSTOM_LLM, payload)
