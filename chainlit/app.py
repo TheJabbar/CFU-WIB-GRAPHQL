@@ -237,7 +237,7 @@ async def make_insight_request(user_query: str, chat_history: str, request_id: s
     }
     return await _post_json_with_retry(f"{API_URL}/cfu-insight", payload)
 
-async def subscribe_to_progress(request_id: str, progress_step: cl.Step):
+async def subscribe_to_progress(request_id: str, progress_step: cl.Step, shared_data: Dict[str, Any]):
     """Subscribe to progress updates via GraphQL WebSocket and update step name dynamically."""
     subscription_query = gql("""
         subscription ProgressUpdates($requestId: String!) {
@@ -258,9 +258,24 @@ async def subscribe_to_progress(request_id: str, progress_step: cl.Step):
             
             async for result in session.subscribe(subscription_query, variable_values={"requestId": request_id}):
                 update = result.get("progressUpdates", {})
-                
+                step_name = update.get("step", "")
                 status = update.get("status", "")
                 message = update.get("message", "")
+                details = update.get("details")
+                
+                # Handle table_ready event - store table data in shared_data
+                if step_name == "table_ready" and details:
+                    try:
+                        table_data = json.loads(details)
+                        columns = table_data.get("columns", [])
+                        rows = table_data.get("rows", [])
+                        
+                        if rows and columns:
+                            shared_data["table_columns"] = columns
+                            shared_data["table_rows"] = rows
+                            shared_data["table_ready"] = True
+                    except Exception as table_err:
+                        _debug(f"Error parsing table data: {table_err}")
 
                 progress_step.name = f"| {message}"
                 await progress_step.update()
@@ -274,7 +289,7 @@ async def subscribe_to_progress(request_id: str, progress_step: cl.Step):
         await progress_step.update()
 
 
-async def subscribe_to_insight_stream(request_id: str, streaming_msg: cl.Message):
+async def subscribe_to_insight_stream(request_id: str, streaming_msg: cl.Message, shared_data: Dict[str, Any]):
     """Subscribe to streaming insight text via GraphQL WebSocket."""
     subscription_query = gql("""
         subscription InsightStream($requestId: String!) {
@@ -287,6 +302,7 @@ async def subscribe_to_insight_stream(request_id: str, streaming_msg: cl.Message
     """)
     
     accumulated_text = ""
+    table_displayed = False
     
     try:
         transport = WebsocketsTransport(url=f"{API_WS_URL}/cfu-insight")
@@ -298,10 +314,31 @@ async def subscribe_to_insight_stream(request_id: str, streaming_msg: cl.Message
                 chunk = chunk_data.get("chunk", "")
                 is_final = chunk_data.get("isFinal", False)
                 
+                # Display table first if available and not yet displayed
+                if not table_displayed and shared_data.get("table_ready"):
+                    formatter = format_number_simplified
+                    table_md = rows_to_markdown_table(
+                        shared_data.get("table_rows", []),
+                        shared_data.get("table_columns", []),
+                        formatter=formatter
+                    )
+                    if table_md:
+                        streaming_msg.content = f"### Data Hasil Analisis\n\n{table_md}\n\n### Insight\n\n"
+                        await streaming_msg.update()
+                        table_displayed = True
+                
                 if chunk:
                     accumulated_text += chunk
                     # Update message content in real-time
-                    streaming_msg.content = accumulated_text
+                    if table_displayed:
+                        table_md = rows_to_markdown_table(
+                            shared_data.get("table_rows", []),
+                            shared_data.get("table_columns", []),
+                            formatter=format_number_simplified
+                        )
+                        streaming_msg.content = f"### Data Hasil Analisis\n\n{table_md}\n\n### Insight\n\n{accumulated_text}"
+                    else:
+                        streaming_msg.content = accumulated_text
                     await streaming_msg.update()
                 
                 if is_final:
@@ -344,18 +381,25 @@ async def main(message: cl.Message):
 
     chat_session: ChatSession = cl.user_session.get("chat_session")
     request_id = str(uuid.uuid4())
+    
+    # Shared data between progress and streaming
+    shared_data = {
+        "table_ready": False,
+        "table_columns": [],
+        "table_rows": []
+    }
 
     async with cl.Step(name=" | Menganalisis pertanyaan Anda...", type="run") as progress_step:
         
         try:
-            progress_task = asyncio.create_task(subscribe_to_progress(request_id, progress_step))
+            progress_task = asyncio.create_task(subscribe_to_progress(request_id, progress_step, shared_data))
             
             # Create empty message for streaming text
             streaming_msg = cl.Message(content="")
             await streaming_msg.send()
             
-            # Start insight stream subscription
-            stream_task = asyncio.create_task(subscribe_to_insight_stream(request_id, streaming_msg))
+            # Start insight stream subscription with table display
+            stream_task = asyncio.create_task(subscribe_to_insight_stream(request_id, streaming_msg, shared_data))
             
             chat_history = chat_session.get_history_string(last_n=3)
             insight_result = await make_insight_request(user_query, chat_history, request_id)
@@ -404,30 +448,22 @@ async def main(message: cl.Message):
         wants_text = intent_from_backend.get("wantsText", True)
         wants_table = intent_from_backend.get("wantsTable", True)
         
-        # Prepare table and chart elements
-        additional_content_parts = []
-        
-        # Only display the table if the user requests it AND data is available.
-        if wants_table and table_md:
-            additional_content_parts.append(table_md)
-        
+        # Add chart at the end (after table and streaming text)
         elements = []
         if isinstance(chart_info, dict) and chart_info.get("chart"):
             try:
                 fig = go.Figure(json.loads(chart_info["chart"]))
                 elements.append(cl.Plotly(figure=fig, display="inline"))
+                
+                # Add chart title to the message content
+                current_content = streaming_msg.content
+                if current_content and not current_content.endswith("\n\n"):
+                    current_content += "\n\n"
+                streaming_msg.content = current_content + "### Grafik Visualisasi\n"
+                streaming_msg.elements = elements
+                await streaming_msg.update()
             except Exception as chart_e:
-                additional_content_parts.append(f"\n\n*❌ Gagal menampilkan grafik: {str(chart_e)}*")
-        
-        # Update the streaming message with table and chart
-        if additional_content_parts:
-            combined_content = streamed_text + "\n\n" + "\n\n".join(additional_content_parts)
-            streaming_msg.content = combined_content
-            streaming_msg.elements = elements
-            await streaming_msg.update()
-        elif elements:
-            streaming_msg.elements = elements
-            await streaming_msg.update()
+                _debug(f"Error displaying chart: {chart_e}")
         
         # If no streaming happened (e.g., greeting), send as regular message
         if not streamed_text and formatted_answer:

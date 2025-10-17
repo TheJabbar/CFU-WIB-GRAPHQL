@@ -414,6 +414,15 @@ async def get_insight_logic(
         emit("query", "completed", f"Query berhasil - {len(rows)} baris data ditemukan")
         last_rows = rows
 
+        # Send table data first if requested (before streaming text)
+        if "dataRows" in requested_fields and intent_dict.get("wants_table", False) and rows:
+            data_cols = list(rows[0].keys()) if rows else []
+            table_data_json = json.dumps({
+                "columns": data_cols,
+                "rows": rows
+            })
+            emit("table_ready", "completed", "Tabel data siap ditampilkan", details=table_data_json)
+
         if "output" in requested_fields:
             emit("insight", "in_progress", "Menghasilkan insight dari data...")
             
