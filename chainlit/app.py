@@ -23,7 +23,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", None)
 @cl.password_auth_callback
 def auth_callback(username: str, password: str) -> Optional[cl.User]:
     """Authenticate user with a simple check (temporary for demo use)."""
-    if username == "admin" and password == "admin":
+    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
         return cl.User(identifier="admin")
     return None
 
