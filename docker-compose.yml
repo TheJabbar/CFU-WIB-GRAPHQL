@@ -18,6 +18,11 @@ services:
       - ./api/security.py:/app/security.py
       - ./api/utils.py:/app/utils.py
       - ./api/data:/app/data
+      - ./api/routes.py:/app/routes.py
+      - ./api/.env:/app/.env
+      - ./api/graphql_schema.py:/app/graphql_schema.py
+      - ./api/requirements.txt:/app/requirements.txt
+      - ./api/chart_generator.py:/app/chart_generator.py
     restart: unless-stopped
 
   # Chainlit Service
@@ -33,6 +38,9 @@ services:
     volumes:
       - ./chainlit/app.py:/app/app.py
       - ./chainlit/.env:/app/.env
+      - ./chainlit/.chainlit:/app/.chainlit
+      - ./chainlit/.chainlit/chainlit.md:/app/.chainlit/chainlit.md
+      - ./chainlit/.chainlit/config.toml:/app/.chainlit/config.toml
     restart: unless-stopped
     labels:
       - "traefik.enable=true"

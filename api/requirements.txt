@@ -14,3 +14,6 @@ tqdm
 uvicorn
 plotly
 strawberry-graphql[fastapi]
+gql[all]
+strawberry-graphql[asgi_websockets]
+gql[websockets]

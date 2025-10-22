@@ -3,3 +3,8 @@ httpx
 python-dotenv
 loguru
 plotly
+gql[websockets]
+gql[all]
+strawberry-graphql[fastapi]
+strawberry-graphql[asgi_websockets]
+websockets>=10.0

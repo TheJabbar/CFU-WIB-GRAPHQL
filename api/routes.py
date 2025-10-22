@@ -2,6 +2,9 @@ from typing import List, Dict, Any, Optional, Tuple
 import json
 import time
 import re
+import asyncio
+from datetime import datetime
+import pytz
 from fastapi import HTTPException
 from fastapi.security.api_key import APIKey
 from loguru import logger
@@ -18,6 +21,7 @@ from llm_engine import (
     telkomllm_fix_sql,
     telkomllm_generate_topic,
     telkomllm_generate_recommendation_question,
+    telkomllm_greeting_and_general
 )
 
 from lib.prompt import (
@@ -171,12 +175,19 @@ async def select_table_and_prompt(user_query: str) -> Tuple[str, str, str]:
         parsed = {"table_name": default_table, "prompt": default_prompt}
 
     table_name = parsed["table_name"]
+    prompt_name = parsed["prompt"]
+    instruction_prompt = settings.get_prompt_by_name(prompt_name)
+
+    # If the selected prompt is for greetings, we don't need a valid table.
+    if prompt_name == "Greeting or General Question":
+        return table_name, instruction_prompt, prompt_name
+
+    # For all other data-related prompts, a valid table name is required.
     valid_names = [c["table_name"] for c in settings.tables_config]
     if table_name not in valid_names:
         raise HTTPException(status_code=400, detail=f"Invalid table selected by LLM: {table_name}")
 
-    instruction_prompt = settings.get_prompt_by_name(parsed["prompt"])
-    return table_name, instruction_prompt, parsed["prompt"]
+    return table_name, instruction_prompt, prompt_name
 
 
 def get_schema_and_sample(table_name: str) -> Tuple[List[str], Dict[str, Any]]:
@@ -277,16 +288,27 @@ async def execute_sql_query(generated_sql: str, columns_list: List[str]) -> List
 
 
 async def generate_insight(table_name: str, columns_list: List[str], table_data: List[Dict[str, Any]],
-                           user_query: str, instruction_prompt: str) -> str:
+                           user_query: str, instruction_prompt: str, intent: Dict[str, bool], 
+                           stream: bool = False, stream_callback = None) -> str:
     """Use LLM to generate textual insight from query results."""
     t0 = time.monotonic()
+
+    if intent.get("wants_simplified_numbers", True):
+        number_format_instruction = "Gunakan format sederhana (contoh: Rp5.025,1 Miliar, bukan Rp5,03 Triliun)."
+    else:
+        number_format_instruction = "Gunakan angka lengkap tanpa singkatan (contoh: 5.025.100.000.000)."
+    
+    final_prompt = generate_insight_prompt.replace('{number_format_instruction}', number_format_instruction)
+
     insight = await telkomllm_infer_sql(
-        prompt=generate_insight_prompt,
+        prompt=final_prompt, 
         user_query=user_query,
         table_name=table_name,
         instruction_prompt=instruction_prompt,
         column_list=columns_list,
-        table_data=table_data
+        table_data=table_data,
+        stream=stream,
+        stream_callback=stream_callback
     )
     logger.debug(f"[Timing] generate_insight {(time.monotonic() - t0):.2f}s")
     return str(insight)
@@ -295,78 +317,185 @@ async def generate_insight(table_name: str, columns_list: List[str], table_data:
 async def get_insight_logic(
     query: str,
     chat_history: Optional[str],
-    requested_fields: List[str]
+    requested_fields: List[str],
+    request_id: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Main agent logic. Handles table selection, SQL execution, insight generation, and optional chart/data output."""
-    table_name, instruction_prompt, prompt_name_for_chart = await select_table_and_prompt(query)
+    """
+    Main agent logic combining a robust agentic loop with the corrected flow:
+    1. Plan first (Contextualize Query).
+    2. Then, enter an execution loop that handles the rest.
+    """
+    
+    def emit(step: str, status: str, message: str, details: Optional[str] = None):
+        if request_id:
+            try:
+                from graphql_schema import emit_progress
+                emit_progress(request_id, step, status, message, details)
+            except ImportError:
+                pass
+
+    # Contextualization (adjust the follow-up question based on chat history)
+    emit("context_completion", "in_progress", "Memahami konteks pertanyaan...")
+    planning_state = await execute_agent_step(
+        agent_prompt_text=agent_prompt,
+        query=query,
+        chat_history=chat_history,
+        tools_answer=""
+    )
+    completed_query = planning_state.get("action_input") or query
+    logger.info(f"Query contextualized from '{query}' to '{completed_query}'")
+    emit("context_completion", "completed", f"Pertanyaan diproses: {completed_query}")
+
+    # Intent Recognition
+    emit("intent", "in_progress", "Mengenali intent...")
+    intent_dict = await get_intent_logic(completed_query)
+    logger.info(f"Intent recognized for completed query: {intent_dict}")
+    emit("intent", "completed", "Intent berhasil dikenali")
+
+    # Table & Prompt Selection
+    emit("table_selection", "in_progress", "Memilih tabel dan prompt...")
+    table_name, instruction_prompt, prompt_name_for_chart = await select_table_and_prompt(completed_query)
+    emit("table_selection", "completed", f"Tabel terpilih: {table_name}")
+
+    if prompt_name_for_chart == "Greeting or General Question":
+        logger.info("Handling a greeting or general question, bypassing data pipeline.")
+        emit("greeting", "in_progress", "Memproses sapaan...")
+        jakarta_tz = pytz.timezone("Asia/Jakarta")
+        current_time_str = datetime.now(jakarta_tz).strftime('%A, %d %B %Y, %H:%M %Z')
+        time_aware_prompt = instruction_prompt.replace('{current_time}', current_time_str)
+        
+        # Streaming
+        async def stream_callback(chunk: str):
+            try:
+                from graphql_schema import emit_text_stream
+                emit_text_stream(request_id, chunk, is_final=False)
+            except ImportError:
+                pass
+        
+        greeting_response = await telkomllm_greeting_and_general(
+            prompt=time_aware_prompt, 
+            user_query=completed_query,
+            stream=True if request_id else False,
+            stream_callback=stream_callback if request_id else None
+        )
+        
+        # Send final chunk
+        if request_id:
+            try:
+                from graphql_schema import emit_text_stream
+                emit_text_stream(request_id, "", is_final=True)
+            except ImportError:
+                pass
+        
+        emit("greeting", "completed", "Respon sapaan berhasil dibuat")
+        return { 
+            "output": str(greeting_response), 
+            "chart": None, 
+            "chart_type": None, 
+            "chart_library": None, 
+            "data_columns": [], 
+            "data_rows": [],
+            "intent": intent_dict
+        }
+
+    # Data Schema Preparation
+    emit("schema", "in_progress", "Mengambil skema data...")
     column_list, first_row = get_schema_and_sample(table_name)
+    emit("schema", "completed", "Skema data berhasil diambil")
+
 
     insight_text = ""
     last_rows: List[Dict[str, Any]] = []
     step_count = 0
-    agent_state = {"action": "Start", "action_input": query, "final_answer": ""}
+
+    agent_state = {"action": "Continue", "action_input": completed_query, "final_answer": ""}
 
     while agent_state["action"] != "Final Answer":
         if step_count >= MAX_AGENT_STEPS:
-            logger.warning("[Agentic] Reached MAX_AGENT_STEPS. Forcing final answer.")
-            agent_state["final_answer"] = insight_text or "No insights available."
+            logger.warning(f"[Agentic] Reached MAX_AGENT_STEPS. Forcing final answer.")
+            agent_state["final_answer"] = insight_text or "Proses mencapai batas maksimal, tidak ada insight yang dapat dihasilkan."
             break
 
-        agent_state = await execute_agent_step(
-            agent_prompt_text=agent_prompt,
-            query=agent_state["action_input"],
-            chat_history=chat_history,
-            tools_answer=insight_text
-        )
-        logger.debug(f"[Agentic] Step {step_count+1} state: {agent_state}")
+        # If the insight already exists, do not process or reason further
+        if insight_text:
+            logger.debug("[Agentic] Insight text is ready. Bypassing agent thought process.")
+            agent_state = { "action": "Final Answer", "action_input": "", "final_answer": insight_text }
+            continue
 
-        if agent_state["action"] == "Final Answer":
-            break
+        action_input = agent_state.get("action_input") or completed_query
 
-        action_input = agent_state.get("action_input") or query
+        emit("sql", "in_progress", "Membuat SQL query...")
         generated_sql = await generate_and_validate_sql(
-            table_name=table_name,
-            columns_list=column_list,
-            first_row=first_row,
-            user_query=action_input,
-            instruction_prompt=instruction_prompt
+            table_name=table_name, columns_list=column_list, first_row=first_row,
+            user_query=action_input, instruction_prompt=instruction_prompt
         )
+        emit("sql", "completed", "SQL query berhasil dibuat")
+
+        emit("query", "in_progress", "Menjalankan query ke database...")
         rows = await execute_sql_query(generated_sql, column_list)
+        emit("query", "completed", f"Query berhasil - {len(rows)} baris data ditemukan")
         last_rows = rows
 
-        # Generate text insight only if explicitly requested
-        if "output" in requested_fields:
-            logger.info("Logic: Client requested text, generating insight...")
-            insight_text = await generate_insight(
-                table_name=table_name,
-                columns_list=column_list,
-                table_data=rows,
-                user_query=query,
-                instruction_prompt=instruction_prompt
-            )
-        else:
-            insight_text = "Data successfully retrieved from the database."
+        # Send table data first if requested (before streaming text)
+        if "dataRows" in requested_fields and intent_dict.get("wants_table", False) and rows:
+            data_cols = list(rows[0].keys()) if rows else []
+            table_data_json = json.dumps({
+                "columns": data_cols,
+                "rows": rows
+            })
+            emit("table_ready", "completed", "Tabel data siap ditampilkan", details=table_data_json)
 
+        if "output" in requested_fields:
+            emit("insight", "in_progress", "Menghasilkan insight dari data...")
+            
+            # Define streaming callback
+            async def stream_callback(chunk: str):
+                try:
+                    from graphql_schema import emit_text_stream
+                    emit_text_stream(request_id, chunk, is_final=False)
+                except ImportError:
+                    pass
+            
+            insight_text = await generate_insight(
+                table_name=table_name, columns_list=column_list, table_data=rows,
+                user_query=action_input, instruction_prompt=instruction_prompt,
+                intent=intent_dict,
+                stream=True if request_id else False,
+                stream_callback=stream_callback if request_id else None
+            )
+            
+            # Emit final chunk
+            if request_id:
+                try:
+                    from graphql_schema import emit_text_stream
+                    emit_text_stream(request_id, "", is_final=True)
+                except ImportError:
+                    pass
+            
+            emit("insight", "completed", "Insight teks berhasil dibuat")
+        else:
+            insight_text = "Data berhasil diambil."
+        
         step_count += 1
 
-    final_output = agent_state.get("final_answer") or (insight_text if "output" in requested_fields else "")
+    final_output = agent_state.get("final_answer") or insight_text
 
-    # Chart generation if requested
-    chart_json, chart_library, chart_type = (None, None, None)
-    if "chart" in requested_fields:
-        logger.info("Logic: Client requested chart, checking eligibility...")
-        if _should_generate_chart(prompt_name_for_chart, query, last_rows):
-            chart_type = _determine_chart_type(prompt_name_for_chart, query)
+
+    chart_json, chart_library, chart_type = None, None, None
+    if "chart" in requested_fields and intent_dict.get("wants_chart", False):
+        emit("chart", "in_progress", "Memeriksa kelayakan chart...")
+        if _should_generate_chart(prompt_name_for_chart, completed_query, last_rows):
+            chart_type = _determine_chart_type(prompt_name_for_chart, completed_query)
+            emit("chart", "in_progress", f"Membuat chart tipe: {chart_type}...")
             chart_json = ChartGenerator.create_trend_chart(last_rows, chart_type)
             if chart_json:
-                logger.info("[Agentic] Chart generated via Plotly")
                 chart_library = "plotly"
+                emit("chart", "completed", f"Chart {chart_type} berhasil dibuat")
         else:
-            logger.info("Chart skipped: not a trend request or insufficient data.")
+            emit("chart", "completed", "Chart tidak diperlukan untuk query ini")
 
-    # Raw data if requested
     data_rows_to_send, data_columns_to_send = [], []
-    if "dataRows" in requested_fields and last_rows:
+    if "dataRows" in requested_fields and intent_dict.get("wants_table", False) and last_rows:
         data_rows_to_send = last_rows
         if "dataColumns" in requested_fields:
             data_columns_to_send = list(last_rows[0].keys())
@@ -377,9 +506,9 @@ async def get_insight_logic(
         "chart_type": chart_type,
         "chart_library": chart_library,
         "data_columns": data_columns_to_send,
-        "data_rows": data_rows_to_send
+        "data_rows": data_rows_to_send,
+        "intent": intent_dict
     }
-
 
 async def get_topic_logic(chat_history: str) -> str:
     """Generate discussion topic based on the chat history."""
@@ -419,12 +548,12 @@ async def get_intent_logic(query: str) -> Dict[str, bool]:
         logger.info(f"Intent recognized: {parsed_intent}")
         return parsed_intent
 
-    # Fallback if parsing fails
     logger.warning("Failed to parse intent from LLM, using fallback defaults.")
     return {
         "wants_text": True,
         "wants_chart": False,
-        "wants_table": True
+        "wants_table": True,
+        "wants_simplified_numbers": True 
     }
 
 

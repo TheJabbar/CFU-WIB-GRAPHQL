@@ -6,7 +6,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 from loguru import logger
 
-from lib.prompt import create_generic_sql
+from lib.prompt import create_generic_sql, greeting_and_general_prompt
 from lib.cfu_prompt import (
     monthly_performance_prompt,
     trend_analysis_prompt,
@@ -45,13 +45,26 @@ class Settings(BaseSettings):
                 "Month-over-Month Growth (GMOM), Year-over-Year Growth (GYOY), Units, and "
                 "hierarchy category levels L0 through L6."
             ),
-            "source_file": "Format_Upload Radir_Sampel.xlsx",
-            "sheet_names": ["Jan25", "Feb25", "Mar25", "Apr25", "Mei25", "Jun25", "Jul25"],
+            "sources": [
+                {
+                    "file_name": "Format_Upload Radir_Sampel.xlsx",
+                    "sheet_names": ["Jan25", "Feb25", "Mar25", "Apr25", "Mei25", "Jun25", "Jul25"],
+                },
+                {
+                    "file_name": "Sampel_Upload Radir CFU WIB_2024.xlsx", 
+                    "sheet_names": ["012024", "022024", "032024", "042024", "052024", "062024", "072024", "082024", "092024", "102024", "112024", "122024"], 
+                }
+            ]
         }
     ]
 
     # Updated prompt configuration mapping
     prompt_config: List[Dict[str, Any]] = [
+        {
+            "prompt_name": "Greeting or General Question",
+            "prompt_description": "Handles conversational greetings, introductions, and questions that are not related to data analysis.",
+            "instruction_prompt": greeting_and_general_prompt,
+        },
         {
             "prompt_name": "CFU Monthly Performance Analysis",
             "prompt_description": "Analyze division performance for specific period showing Revenue, COE, EBITDA, Net Income with achievement and growth (MTD/YTD).",
