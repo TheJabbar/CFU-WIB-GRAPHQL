@@ -287,6 +287,38 @@ async def execute_sql_query(generated_sql: str, columns_list: List[str]) -> List
         raise HTTPException(status_code=500, detail=f"SQL execution failed: {last_exc}")
 
 
+def _clean_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Remove columns that are entirely None or empty strings from the rows.
+    This is to prevent displaying empty columns in the frontend table.
+    """
+    if not rows:
+        return []
+    
+    keys = list(rows[0].keys())
+    empty_keys = set()
+    
+    for key in keys:
+        is_empty = True
+        for row in rows:
+            val = row.get(key)
+            # Check for None, empty string, or string "None" (just in case)
+            if val is not None and str(val).strip() != "" and str(val).lower() != "none":
+                is_empty = False
+                break
+        if is_empty:
+            empty_keys.add(key)
+            
+    if not empty_keys:
+        return rows
+        
+    cleaned_rows = []
+    for row in rows:
+        cleaned_rows.append({k: v for k, v in row.items() if k not in empty_keys})
+        
+    return cleaned_rows
+
+
 async def generate_insight(table_name: str, columns_list: List[str], table_data: List[Dict[str, Any]],
                            user_query: str, instruction_prompt: str, intent: Dict[str, bool], 
                            stream: bool = False, stream_callback = None) -> str:
@@ -300,13 +332,16 @@ async def generate_insight(table_name: str, columns_list: List[str], table_data:
     
     final_prompt = generate_insight_prompt.replace('{number_format_instruction}', number_format_instruction)
 
+    # Clean rows to remove empty columns
+    cleaned_table_data = _clean_rows_for_display(table_data)
+
     insight = await telkomllm_infer_sql(
         prompt=final_prompt, 
         user_query=user_query,
         table_name=table_name,
         instruction_prompt=instruction_prompt,
         column_list=columns_list,
-        table_data=table_data,
+        table_data=cleaned_table_data,
         stream=stream,
         stream_callback=stream_callback
     )
@@ -436,12 +471,15 @@ async def get_insight_logic(
         emit("query", "completed", f"Query berhasil - {len(rows)} baris data ditemukan")
         last_rows = rows
 
+        # Clean rows for display (remove empty columns like category_l3/l4 if they are null)
+        display_rows = _clean_rows_for_display(rows)
+
         # Send table data first if requested (before streaming text)
-        if "dataRows" in requested_fields and intent_dict.get("wants_table", False) and rows:
-            data_cols = list(rows[0].keys()) if rows else []
+        if "dataRows" in requested_fields and intent_dict.get("wants_table", False) and display_rows:
+            data_cols = list(display_rows[0].keys()) if display_rows else []
             table_data_json = json.dumps({
                 "columns": data_cols,
-                "rows": rows
+                "rows": display_rows
             })
             emit("table_ready", "completed", "Tabel data siap ditampilkan", details=table_data_json)
 
@@ -496,9 +534,10 @@ async def get_insight_logic(
 
     data_rows_to_send, data_columns_to_send = [], []
     if "dataRows" in requested_fields and intent_dict.get("wants_table", False) and last_rows:
-        data_rows_to_send = last_rows
-        if "dataColumns" in requested_fields:
-            data_columns_to_send = list(last_rows[0].keys())
+        cleaned_last_rows = _clean_rows_for_display(last_rows)
+        data_rows_to_send = cleaned_last_rows
+        if "dataColumns" in requested_fields and cleaned_last_rows:
+            data_columns_to_send = list(cleaned_last_rows[0].keys())
 
     return {
         "output": str(final_output),
