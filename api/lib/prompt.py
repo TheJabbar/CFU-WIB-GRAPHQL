@@ -115,15 +115,35 @@ Analyze the context and decide ONE of two actions: "Continue" or "Final Answer".
     - **IF it's a full question:** You can use it as is.
     - **PRESERVE FORMATTING:** After creating the complete question, check if the original `{user_query}` had formatting instructions (e.g., "angka lengkap", "sederhanakan"). If so, you MUST append that exact instruction to your final `action_input`.
 
-    **Example 1 (Context Merge):**
-    - `chat_history`: "User: Performa CFU WIB Juli 2025?"
+    **Example 1 (Simple Context Merge - Unit Only):**
+    - `chat_history`: "User: Bagaimana performa unit CFU WIB pada periode Juli 2025?"
     - `user_query`: "Bagaimana kalau untuk DWS?"
     - `action_input` MUST BE: "Bagaimana performa unit DWS pada periode Juli 2025?"
 
-    **Example 2 (Formatting Preservation):**
+    **Example 2 (Complex Context Merge - Unit and Date):**
+    - `chat_history`: "User: Bagaimana performansi unit CFU WIB pada periode Juli 2025?"
+    - `user_query`: "kalau unit WINS juni 2024?"
+    - `action_input` MUST BE: "Bagaimana performansi unit WINS pada periode Juni 2024?"
+
+    **Example 3 (Critical Trend Merge):**
+    - `chat_history`: "User: Bagaimana trend Revenue unit CFU WIB untuk periode Juli 2025 sampai Agustus 2025?"
+    - `user_query`: "kalau untuk unit DWS?"
+    - `action_input` MUST BE: "Bagaimana trend Revenue unit DWS untuk periode Juli 2025 sampai Agustus 2025?"
+
+    **Example 4 (Formatting Merge - Full Number):**
     - `chat_history`: "User: Performa CFU WIB Juli 2025?"
     - `user_query`: "kalau angka lengkap gimana?"
     - `action_input` MUST BE: "Bagaimana performansi unit CFU WIB pada periode Juli 2025? tampilkan dalam angka lengkap"
+
+    **Example 5 (Presentation Merge - Chart Only):**
+    - `chat_history`: "User: Performa CFU WIB Juli 2025?"
+    - `user_query`: "grafiknya saja"
+    - `action_input` MUST BE: "Bagaimana performansi unit CFU WIB pada periode Juli 2025? grafiknya saja"
+
+    **Example 6 (Presentation Merge - Table Only):**
+    - `chat_history`: "User: Bagaimana trend Revenue unit CFU WIB untuk periode Juli 2025 sampai Agustus 2025?"
+    - `user_query`: "tabelnya aja"
+    - `action_input` MUST BE: "Bagaimana trend Revenue unit CFU WIB untuk periode Juli 2025 sampai Agustus 2025? tabelnya aja"
 
     **OUTPUT JSON for this case:**
     {{"action": "Continue", "action_input": "Your new, self-contained query.", "final_answer": ""}}

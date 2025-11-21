@@ -9,16 +9,57 @@ Valid Values Reference:
 - DIV: ['CFU WIB', 'DMT', 'DWS', 'TELIN', 'TIF', 'TSAT', 'WINS']
 - PERIOD: [202401,202402,..., 202501, 202502, 202503, 202504, 202505, 202506, 202507] (integers)
 - L2 Key Metrics: ['REVENUE', 'COE', 'EBITDA', 'NET INCOME']
+- HIERARCHY REFERENCE (L2 -> L3 -> L4 -> L5 -> L6):
+  REVENUE
+    REVENUE STREAM
+      Legacy -> [Inter CFU, Intra CFU, External]
+      Connectivity -> [Inter CFU, Intra CFU, External]
+      Digital -> [Inter CFU, Intra CFU, External]
+    REVENUE
+      Legacy
+        Interconnection -> [Incoming International, Outgoing International, Transit, Incoming Domestic]
+        Value Added Service
+        Others Legacy -> [FMC, ITKP]
+        Hubbing -> [P2P]
+      Connectivity
+        Network -> [SL, IPLC, Sarpen]
+        Transponder
+        Multimedia -> [Metro-E, IP Transit, Others (ADSL, Speedy, VPN IP, Astinet), Wi-Fi Broadband, Managed Service]
+        WSA & TSA-1
+      Digital Platform
+        Platform
+        Digital Messaging -> [A2P Intl, A2P Domestic, Intl Hub]
+        Data Center & Content Platform -> [CNDC, CDN]
+        IT & Billing Support System
+        Other Platform -> [Smart Device, IaaS, SDWAN]
+      Digital Service
+        New Business
+        Other Service -> [Game Online, Anti virus, Content Speedy]
+  COE
+    Operation & Maintenance -> [OM Non A2P, SMS A2P]
+    Interconnection -> [Domestik, International]
+    General & Administration -> [General, Administrasi]
+    Marketing
+    Managed Service
+    Total Cost of Sales -> [Data, Voice, BPO, Satellite, Digital Business, Managed Services, MNO, Data Center, MVNO]
+  EBITDA
+    Depreciation & Amortization
+  EBIT
+    Other Income (Expenses)
 
 Rules:
 - ALWAYS translate user's "unit" to "div" in WHERE clause
 - Use latest available period if not specified (202507)
 - Always filter: week_1_0_5___fm = 'FM'
+- HIERARCHY LOGIC (Crucial):
+  - IF user asks for specific L3 (e.g. 'Legacy'), filter `l3 = 'Legacy'` AND `(l4 IS NULL OR l4 = '')`.
+  - IF user asks for specific L4, filter `l4 = 'Value Added Service'` AND `(l5 IS NULL OR l5 = '')`.
+  - DEFAULT (No specific level asked): Filter `(l3 IS NULL OR l3 = '')` to get L2 Aggregate.
 - Include both MTD and YTD for comprehensive view
 - Focus on L2 level for main performance metrics
 - Order by importance: REVENUE, COE, EBITDA, NET INCOME
 
-Reference pattern (Performance summary for specific division):
+Reference pattern (Performance summary for specific division - Default L2):
 SELECT
     div AS unit_name,
     l2 AS metric_type,
@@ -29,6 +70,7 @@ SELECT
 FROM cfu_performance_data
 WHERE period = 202507 AND week_1_0_5___fm = 'FM' AND div = 'CFU WIB'
     AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'NET INCOME')
+    AND (l3 IS NULL OR l3 = '') -- Change this based on Hierarchy Logic
 GROUP BY div, l2
 ORDER BY CASE l2 
     WHEN 'REVENUE' THEN 1 
@@ -43,14 +85,55 @@ Task: Generate a SQLite query to show trends for Revenue/COE/EBITDA/NET INCOME o
 
 CRITICAL USER MAPPING: When user says "unit", they mean "div" (division) in database!
 
+HIERARCHY REFERENCE (L2 -> L3 -> L4 -> L5 -> L6):
+  REVENUE
+    REVENUE STREAM
+      Legacy -> [Inter CFU, Intra CFU, External]
+      Connectivity -> [Inter CFU, Intra CFU, External]
+      Digital -> [Inter CFU, Intra CFU, External]
+    REVENUE
+      Legacy
+        Interconnection -> [Incoming International, Outgoing International, Transit, Incoming Domestic]
+        Value Added Service
+        Others Legacy -> [FMC, ITKP]
+        Hubbing -> [P2P]
+      Connectivity
+        Network -> [SL, IPLC, Sarpen]
+        Transponder
+        Multimedia -> [Metro-E, IP Transit, Others (ADSL, Speedy, VPN IP, Astinet), Wi-Fi Broadband, Managed Service]
+        WSA & TSA-1
+      Digital Platform
+        Platform
+        Digital Messaging -> [A2P Intl, A2P Domestic, Intl Hub]
+        Data Center & Content Platform -> [CNDC, CDN]
+        IT & Billing Support System
+        Other Platform -> [Smart Device, IaaS, SDWAN]
+      Digital Service
+        New Business
+        Other Service -> [Game Online, Anti virus, Content Speedy]
+  COE
+    Operation & Maintenance -> [OM Non A2P, SMS A2P]
+    Interconnection -> [Domestik, International]
+    General & Administration -> [General, Administrasi]
+    Marketing
+    Managed Service
+    Total Cost of Sales -> [Data, Voice, BPO, Satellite, Digital Business, Managed Services, MNO, Data Center, MVNO]
+  EBITDA
+    Depreciation & Amortization
+  EBIT
+    Other Income (Expenses)
+
 Rules:
 - ALWAYS translate user's "unit" to "div" in WHERE clause
 - For period ranges, use BETWEEN with integer periods
+- HIERARCHY LOGIC (Crucial):
+  - IF user asks for specific L3, filter `l3 = 'Legacy'` AND `(l4 IS NULL OR l4 = '')`.
+  - DEFAULT: Filter `(l3 IS NULL OR l3 = '')` to get L2 Aggregate.
 - Group by period and division for trend analysis
 - Include actual values for trend visualization
 - Order chronologically by period
 
-Reference pattern (Monthly trend for specific division):
+Reference pattern (Monthly trend for specific division - Default L2):
 SELECT
     period,
     div AS unit_name,
@@ -59,6 +142,7 @@ SELECT
 FROM cfu_performance_data
 WHERE period BETWEEN 202501 AND 202507 AND week_1_0_5___fm = 'FM'
     AND div = 'CFU WIB' AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'NET INCOME')
+    AND (l3 IS NULL OR l3 = '') -- Change this based on Hierarchy Logic
 GROUP BY period, div, l2
 ORDER BY period ASC, CASE l2 
     WHEN 'REVENUE' THEN 1 WHEN 'COE' THEN 2 
@@ -70,13 +154,54 @@ Task: Generate a SQLite query to compare actual, target, and prev year values ov
 
 CRITICAL USER MAPPING: When user says "unit", they mean "div" (division) in database!
 
+HIERARCHY REFERENCE (L2 -> L3 -> L4 -> L5 -> L6):
+  REVENUE
+    REVENUE STREAM
+      Legacy -> [Inter CFU, Intra CFU, External]
+      Connectivity -> [Inter CFU, Intra CFU, External]
+      Digital -> [Inter CFU, Intra CFU, External]
+    REVENUE
+      Legacy
+        Interconnection -> [Incoming International, Outgoing International, Transit, Incoming Domestic]
+        Value Added Service
+        Others Legacy -> [FMC, ITKP]
+        Hubbing -> [P2P]
+      Connectivity
+        Network -> [SL, IPLC, Sarpen]
+        Transponder
+        Multimedia -> [Metro-E, IP Transit, Others (ADSL, Speedy, VPN IP, Astinet), Wi-Fi Broadband, Managed Service]
+        WSA & TSA-1
+      Digital Platform
+        Platform
+        Digital Messaging -> [A2P Intl, A2P Domestic, Intl Hub]
+        Data Center & Content Platform -> [CNDC, CDN]
+        IT & Billing Support System
+        Other Platform -> [Smart Device, IaaS, SDWAN]
+      Digital Service
+        New Business
+        Other Service -> [Game Online, Anti virus, Content Speedy]
+  COE
+    Operation & Maintenance -> [OM Non A2P, SMS A2P]
+    Interconnection -> [Domestik, International]
+    General & Administration -> [General, Administrasi]
+    Marketing
+    Managed Service
+    Total Cost of Sales -> [Data, Voice, BPO, Satellite, Digital Business, Managed Services, MNO, Data Center, MVNO]
+  EBITDA
+    Depreciation & Amortization
+  EBIT
+    Other Income (Expenses)
+
 Rules:
 - ALWAYS translate user's "unit" to "div" in WHERE clause
 - Include actual, target, and previous year data
+- HIERARCHY LOGIC (Crucial):
+  - IF user asks for specific L3, filter `l3 = 'Legacy'` AND `(l4 IS NULL OR l4 = '')`.
+  - DEFAULT: Filter `(l3 IS NULL OR l3 = '')` to get L2 Aggregate.
 - Group by period for time series comparison
 - Use month_to_date columns for MTD analysis
 
-Reference pattern (Comparison trend for division):
+Reference pattern (Comparison trend for division - Default L2):
 SELECT
     period,
     div AS unit_name,
@@ -87,6 +212,7 @@ SELECT
 FROM cfu_performance_data
 WHERE period BETWEEN 202501 AND 202507 AND week_1_0_5___fm = 'FM'
     AND div = 'CFU WIB' AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'NET INCOME')
+    AND (l3 IS NULL OR l3 = '') -- Change this based on Hierarchy Logic
 GROUP BY period, div, l2
 ORDER BY period ASC;
 '''

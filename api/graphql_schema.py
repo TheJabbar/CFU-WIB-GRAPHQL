@@ -168,7 +168,6 @@ class Query:
                 query=query,
                 chat_history=chat_history,
                 requested_fields=list(requested_fields),
-                # Hapus parameter 'intent'
                 request_id=request_id
             )
 
