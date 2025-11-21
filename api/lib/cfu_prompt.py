@@ -63,6 +63,8 @@ Reference pattern (Performance summary for specific division - Default L2):
 SELECT
     div AS unit_name,
     l2 AS metric_type,
+    l3 AS category_l3,
+    l4 AS category_l4,
     SUM(month_to_date_actual) AS actual_mtd,
     SUM(year_to_date_actual) AS actual_ytd,
     ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
@@ -71,7 +73,7 @@ FROM cfu_performance_data
 WHERE period = 202507 AND week_1_0_5___fm = 'FM' AND div = 'CFU WIB'
     AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'NET INCOME')
     AND (l3 IS NULL OR l3 = '') -- Change this based on Hierarchy Logic
-GROUP BY div, l2
+GROUP BY div, l2, l3, l4
 ORDER BY CASE l2 
     WHEN 'REVENUE' THEN 1 
     WHEN 'COE' THEN 2 
@@ -138,12 +140,14 @@ SELECT
     period,
     div AS unit_name,
     l2 AS metric_type,
+    l3 AS category_l3,
+    l4 AS category_l4,
     SUM(month_to_date_actual) AS actual_mtd
 FROM cfu_performance_data
 WHERE period BETWEEN 202501 AND 202507 AND week_1_0_5___fm = 'FM'
     AND div = 'CFU WIB' AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'NET INCOME')
     AND (l3 IS NULL OR l3 = '') -- Change this based on Hierarchy Logic
-GROUP BY period, div, l2
+GROUP BY period, div, l2, l3, l4
 ORDER BY period ASC, CASE l2 
     WHEN 'REVENUE' THEN 1 WHEN 'COE' THEN 2 
     WHEN 'EBITDA' THEN 3 WHEN 'NET INCOME' THEN 4 ELSE 5 END;
@@ -206,6 +210,8 @@ SELECT
     period,
     div AS unit_name,
     l2 AS metric_type,
+    l3 AS category_l3,
+    l4 AS category_l4,
     SUM(month_to_date_actual) AS actual_mtd,
     SUM(month_to_date_target) AS target_mtd,
     SUM(month_to_date_prev_month) AS prev_year_mtd
@@ -213,7 +219,7 @@ FROM cfu_performance_data
 WHERE period BETWEEN 202501 AND 202507 AND week_1_0_5___fm = 'FM'
     AND div = 'CFU WIB' AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'NET INCOME')
     AND (l3 IS NULL OR l3 = '') -- Change this based on Hierarchy Logic
-GROUP BY period, div, l2
+GROUP BY period, div, l2, l3, l4
 ORDER BY period ASC;
 '''
 
