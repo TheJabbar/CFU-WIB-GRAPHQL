@@ -66,9 +66,11 @@ SELECT
     l3 AS category_l3,
     l4 AS category_l4,
     SUM(month_to_date_actual) AS actual_mtd,
+    ROUND(AVG(month_to_date_ach), 2) AS achievement_mtd,
+    ROUND(AVG(gmom), 2) AS growth_mom
     SUM(year_to_date_actual) AS actual_ytd,
-    ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
-    ROUND(AVG(gmom), 2) AS growth_mom_pct
+    ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd,
+    ROUND(AVG(gyoy), 2) AS growth_yoy
 FROM cfu_performance_data
 WHERE period = 202507 AND week_1_0_5___fm = 'FM' AND div = 'CFU WIB'
     AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'NET INCOME')
