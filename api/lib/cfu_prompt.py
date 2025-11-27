@@ -509,54 +509,28 @@ CRITICAL USER MAPPING: When user says "unit", they mean "div" (division) in data
 
 Rules:
 - ALWAYS translate user's "unit" to "div" in WHERE clause
-- Focus on External Revenue only → check L4, L5, or L6 containing "External"
-- Aggregate at division-level (do not break down into subcategories like CNDC/CDN unless explicitly asked)
-- Must include: actual MTD, actual YTD, achievement MTD, achievement YTD, growth MoM, growth YoY
-- IMPORTANT: 
-    * MTD = (actual of current month) - (actual of previous month)
-    * If current month is January, then YTD = MTD
+- Focus on External Revenue only → check L3 or L4 containing "External"
+- Show detailed breakdown by L3 and L4 to identify specific external revenue streams
+- Must include: actual MTD, actual YTD, achievement MTD, growth MoM
 - Always filter week_1_0_5___fm = 'FM'
+- Order by actual MTD descending
 
-Reference pattern (External Revenue main summary):
-WITH current_month AS (
-    SELECT
-        div,
-        SUM(month_to_date_actual) AS actual_mtd,
-        SUM(year_to_date_actual) AS actual_ytd,
-        ROUND(AVG(month_to_date_ach), 2) AS achievement_mtd_pct,
-        ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd_pct,
-        ROUND(AVG(gmom), 2) AS growth_mom_pct,
-        ROUND(AVG(gyoy), 2) AS growth_yoy_pct
-    FROM cfu_performance_data
-    WHERE period = {period} 
-      AND week_1_0_5___fm = 'FM'
-      AND div = '{division}'
-      AND (l0 LIKE '%REVENUE%' OR l2 = 'REVENUE')
-      AND (l4 LIKE '%External%' OR l5 LIKE '%External%' OR l6 LIKE '%External%')
-    GROUP BY div
-),
-prev_month AS (
-    SELECT
-        div,
-        SUM(month_to_date_actual) AS prev_actual_mtd
-    FROM cfu_performance_data
-    WHERE period = {prev_period}
-      AND week_1_0_5___fm = 'FM'
-      AND div = '{division}'
-      AND (l0 LIKE '%REVENUE%' OR l2 = 'REVENUE')
-      AND (l4 LIKE '%External%' OR l5 LIKE '%External%' OR l6 LIKE '%External%')
-    GROUP BY div
-)
+Reference pattern (External Revenue breakdown):
 SELECT
-    c.div AS unit_name,
-    (c.actual_mtd - IFNULL(p.prev_actual_mtd, 0)) AS actual_mtd,
-    c.actual_ytd,
-    c.achievement_mtd_pct,
-    c.achievement_ytd_pct,
-    c.growth_mom_pct,
-    c.growth_yoy_pct
-FROM current_month c
-LEFT JOIN prev_month p ON c.div = p.div;
+    div AS unit_name,
+    l3 AS category_l3,
+    l4 AS category_l4,
+    SUM(month_to_date_actual) AS actual_mtd,
+    SUM(year_to_date_actual) AS actual_ytd,
+    ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
+    ROUND(AVG(gmom), 2) AS growth_mom_pct
+FROM cfu_performance_data
+WHERE period = 202507 
+  AND week_1_0_5___fm = 'FM'
+  AND div = 'CFU WIB'
+  AND (l3 LIKE '%External%' OR l4 LIKE '%External%')
+GROUP BY div, l3, l4
+ORDER BY actual_mtd DESC;
 '''
 
 external_revenue_trend_prompt = '''
@@ -566,7 +540,7 @@ CRITICAL USER MAPPING: When user says "unit", they mean "div" (division) in data
 
 Rules:
 - ALWAYS translate user's "unit" to "div" in WHERE clause
-- Look for External revenue categories
+- Look for External revenue categories (L3 or L4)
 - Group by period for trend analysis
 - Include actual, target, and previous year data
 - Order chronologically
@@ -582,7 +556,7 @@ FROM cfu_performance_data
 WHERE period BETWEEN 202501 AND 202507 AND week_1_0_5___fm = 'FM' 
     AND div = 'CFU WIB'
     AND (l0 LIKE '%REVENUE%' OR l2 = 'REVENUE')
-    AND (l4 LIKE '%External%' OR l5 LIKE '%External%' OR l6 LIKE '%External%')
+    AND (l3 LIKE '%External%' OR l4 LIKE '%External%')
 GROUP BY period, div
 ORDER BY period ASC;
 '''

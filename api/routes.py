@@ -287,10 +287,73 @@ async def execute_sql_query(generated_sql: str, columns_list: List[str]) -> List
         raise HTTPException(status_code=500, detail=f"SQL execution failed: {last_exc}")
 
 
+def _calculate_summary_row(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Calculate a summary row (TOTAL) for the given rows.
+    Sums numeric columns and leaves others empty.
+    """
+    if not rows:
+        return None
+        
+    keys = list(rows[0].keys())
+    summary = {k: None for k in keys}
+    
+    # Identify columns to sum
+    # We sum columns that are numeric and NOT percentages/ratios
+    ratio_keywords = ['pct', 'ach', 'growth', 'margin', 'ratio', 'percent', 'rate']
+    
+    # We need to find the first text column to put "TOTAL"
+    first_text_col = None
+    for k in keys:
+        # Check if the column generally contains strings
+        is_string = False
+        for r in rows:
+            if r.get(k) is not None:
+                if isinstance(r[k], str):
+                    is_string = True
+                break
+        
+        if is_string:
+            first_text_col = k
+            break
+    
+    if first_text_col:
+        summary[first_text_col] = "TOTAL"
+        
+    # Calculate sums
+    for k in keys:
+        if k == first_text_col:
+            continue
+            
+        # Check if it's a ratio column
+        if any(kw in k.lower() for kw in ratio_keywords):
+            continue
+            
+        # Check if column is numeric
+        is_numeric = False
+        current_sum = 0.0
+        has_data = False
+        
+        for r in rows:
+            val = r.get(k)
+            if isinstance(val, (int, float)):
+                is_numeric = True
+                current_sum += val
+                has_data = True
+            elif val is not None:
+                pass
+        
+        if is_numeric and has_data:
+            summary[k] = current_sum
+
+    return summary
+
+
 def _clean_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Remove columns that are entirely None or empty strings from the rows.
     This is to prevent displaying empty columns in the frontend table.
+    Also replaces 0 and None with "-" for display purposes.
     """
     if not rows:
         return []
@@ -309,12 +372,19 @@ def _clean_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if is_empty:
             empty_keys.add(key)
             
-    if not empty_keys:
-        return rows
-        
     cleaned_rows = []
     for row in rows:
-        cleaned_rows.append({k: v for k, v in row.items() if k not in empty_keys})
+        new_row = {}
+        for k, v in row.items():
+            if k in empty_keys:
+                continue
+            
+            # Replace 0 or None with "-"
+            if v is None or (isinstance(v, (int, float)) and v == 0):
+                new_row[k] = "-"
+            else:
+                new_row[k] = v
+        cleaned_rows.append(new_row)
         
     return cleaned_rows
 
@@ -470,6 +540,12 @@ async def get_insight_logic(
         rows = await execute_sql_query(generated_sql, column_list)
         emit("query", "completed", f"Query berhasil - {len(rows)} baris data ditemukan")
         last_rows = rows
+
+        # Calculate summary row before cleaning
+        if rows:
+            summary_row = _calculate_summary_row(rows)
+            if summary_row:
+                rows.append(summary_row)
 
         # Clean rows for display (remove empty columns like category_l3/l4 if they are null)
         display_rows = _clean_rows_for_display(rows)

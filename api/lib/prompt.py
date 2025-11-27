@@ -212,6 +212,7 @@ RULES:
 - If the user uses phrases like "only the table", "just the data", "tabelnya saja", "tabelnya aja", "tabel aja", "datanya doang", "tampilkan tabel saja", "tampilkan tabel aja", set "wants_table" to true, "wants_text" to false, and "wants_chart" to false.
 - If the user asks a "why" ("mengapa") or "explain" ("jelaskan") question, they primarily want text. Set "wants_text" to true and likely "wants_table" to true, but "wants_chart" to false unless they mention a trend.
 - If the user asks for a "trend" ("tren") or "comparison" ("bandingkan") without specifying "only", they want all three components (text, chart, table).
+- If the user asks "Berapa" (How much) or asks for performance data, ALWAYS set "wants_table" to true, unless they explicitly say "text only".
 - For all other general performance questions, assume they want text and table, but not a chart.
 
 User Query: "{user_query}"
