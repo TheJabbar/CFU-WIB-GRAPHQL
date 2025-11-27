@@ -278,7 +278,7 @@ FROM cfu_performance_data
 WHERE period = 202507 AND week_1_0_5___fm = 'FM' AND div = 'CFU WIB'
     AND l2 = 'REVENUE' AND year_to_date_ach > 100
 GROUP BY div, l3, l4
-ORDER BY surplus_mtd DESC
+ORDER BY surplus_ytd DESC
 LIMIT 15;
 '''
 
