@@ -7,7 +7,7 @@ PipelineDockerEntryV2([
     projectName: 'telkom-dag-ai',
 
     // Nama dari service yang anda buat dan akan digunakan sebagai nama image docker.
-    imageName: 'telkom-dag-ai-wins-smsa2p',
+    imageName: 'telkom-dag-ai-wins-cfu-wib',
 
     // Nama cluster di mana service akan dideploy. Deployment sudah ditentukan di awal, mohon tidak di ubah tanpa komunikasi dengan tim Playcourt.
     deployment: 'bigengine',
