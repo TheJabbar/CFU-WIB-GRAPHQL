@@ -66,9 +66,11 @@ SELECT
     l3 AS category_l3,
     l4 AS category_l4,
     SUM(month_to_date_actual) AS actual_mtd,
+    ROUND(AVG(month_to_date_ach), 2) AS achievement_mtd,
+    ROUND(AVG(gmom), 2) AS growth_mom
     SUM(year_to_date_actual) AS actual_ytd,
-    ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
-    ROUND(AVG(gmom), 2) AS growth_mom_pct
+    ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd,
+    ROUND(AVG(gyoy), 2) AS growth_yoy
 FROM cfu_performance_data
 WHERE period = 202507 AND week_1_0_5___fm = 'FM' AND div = 'CFU WIB'
     AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'NET INCOME')
@@ -230,7 +232,7 @@ CRITICAL USER MAPPING: When user says "unit", they mean "div" (division) in data
 
 Rules:
 - ALWAYS translate user's "unit" to "div" in WHERE clause
-- Filter for underperforming: month_to_date_ach < 100
+- Filter for underperforming: year_to_date_ach < 100
 - Use latest period (202507) unless specified
 - Show detailed breakdown using L3/L4 levels
 - Limit results to top underperformers
@@ -241,11 +243,12 @@ SELECT
     l2 AS main_category,
     l3 AS product_category, 
     l4 AS product_detail,
-    ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
-    SUM(month_to_date_target) - SUM(month_to_date_actual) AS shortfall_mtd
+    SUM(year_to_date_actual) AS actual_ytd,
+    ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd,
+    ROUND(AVG(gyoy), 2) AS growth_yoy
 FROM cfu_performance_data
 WHERE period = 202507 AND week_1_0_5___fm = 'FM' AND div = 'CFU WIB'
-    AND month_to_date_ach < 100 
+    AND year_to_date_ach < 100 
 GROUP BY div, l2, l3, l4
 ORDER BY achievement_pct ASC
 LIMIT 20;
@@ -258,7 +261,7 @@ CRITICAL USER MAPPING: When user says "unit", they mean "div" (division) in data
 
 Rules:
 - ALWAYS translate user's "unit" to "div" in WHERE clause
-- Filter for: l2 = 'REVENUE' AND month_to_date_ach > 100
+- Filter for: l2 = 'REVENUE' AND year_to_date_ach > 100
 - Calculate positive gap: actual - target
 - Order by largest gaps first
 - Limit to significant contributors
@@ -268,14 +271,14 @@ SELECT
     div AS unit_name,
     l3 AS product_category,
     l4 AS product_detail,
-    ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
-    SUM(month_to_date_actual) - SUM(month_to_date_target) AS surplus_mtd,
-    SUM(month_to_date_actual) AS actual_mtd
+    ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd,
+    SUM(year_to_date_actual) AS actual_ytd,
+    ROUND(AVG(gyoy), 2) AS growth_yoy
 FROM cfu_performance_data  
 WHERE period = 202507 AND week_1_0_5___fm = 'FM' AND div = 'CFU WIB'
-    AND l2 = 'REVENUE' AND month_to_date_ach > 100
+    AND l2 = 'REVENUE' AND year_to_date_ach > 100
 GROUP BY div, l3, l4
-ORDER BY surplus_mtd DESC
+ORDER BY surplus_ytd DESC
 LIMIT 15;
 '''
 
@@ -286,7 +289,7 @@ CRITICAL USER MAPPING: When user says "unit", they mean "div" (division) in data
 
 Rules:
 - ALWAYS translate user's "unit" to "div" in WHERE clause  
-- Filter for: l2 = 'REVENUE' AND month_to_date_ach < 100
+- Filter for: l2 = 'REVENUE' AND year_to_date_ach < 100
 - Calculate negative gap: target - actual (shortfall)
 - Order by largest shortfalls first
 
@@ -295,12 +298,12 @@ SELECT
     div AS unit_name,
     l3 AS product_category,
     l4 AS product_detail,
-    ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
-    SUM(month_to_date_target) - SUM(month_to_date_actual) AS shortfall_mtd,
-    SUM(month_to_date_actual) AS actual_mtd
+    ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd,
+    SUM(year_to_date_actual) AS actual_ytd,
+    ROUND(AVG(gyoy), 2) AS growth_yoy
 FROM cfu_performance_data
 WHERE period = 202507 AND week_1_0_5___fm = 'FM' AND div = 'CFU WIB'
-    AND l2 = 'REVENUE' AND month_to_date_ach < 100
+    AND l2 = 'REVENUE' AND year_to_date_ach < 100
 GROUP BY div, l3, l4
 ORDER BY shortfall_mtd DESC
 LIMIT 15;
@@ -322,18 +325,18 @@ SELECT
     div AS unit_name,
     l2 AS component_type,
     l3 AS category,
-    ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
-    SUM(month_to_date_actual) - SUM(month_to_date_target) AS gap_mtd,
+    ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd,
+    SUM(year_to_date_actual) - SUM(year_to_date_target) AS gap_mtd,
     CASE 
-        WHEN l2 = 'REVENUE' AND AVG(month_to_date_ach) > 100 THEN 'Revenue Driver'
-        WHEN l2 = 'COE' AND AVG(month_to_date_ach) < 100 THEN 'Cost Savings'
+        WHEN l2 = 'REVENUE' AND AVG(year_to_date_ach) > 100 THEN 'Revenue Driver'
+        WHEN l2 = 'COE' AND AVG(year_to_date_ach) < 100 THEN 'Cost Savings'
         ELSE 'Other Factor'
     END AS ebitda_impact
 FROM cfu_performance_data
 WHERE period = 202507 AND week_1_0_5___fm = 'FM' AND div = 'CFU WIB'
     AND l2 IN ('REVENUE', 'COE')
-    AND ((l2 = 'REVENUE' AND month_to_date_ach > 100) 
-         OR (l2 = 'COE' AND month_to_date_ach < 100))
+    AND ((l2 = 'REVENUE' AND year_to_date_ach > 100) 
+         OR (l2 = 'COE' AND year_to_date_ach < 100))
 GROUP BY div, l2, l3
 ORDER BY gap_mtd DESC
 LIMIT 15;
@@ -355,18 +358,18 @@ SELECT
     div AS unit_name,
     l2 AS component_type,
     l3 AS category,
-    ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
-    SUM(month_to_date_target) - SUM(month_to_date_actual) AS negative_impact,
+    ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd,
+    SUM(year_to_date_actual) - SUM(year_to_date_target) AS negative_impact,
     CASE 
-        WHEN l2 = 'REVENUE' AND AVG(month_to_date_ach) < 100 THEN 'Revenue Shortfall'
-        WHEN l2 = 'COE' AND AVG(month_to_date_ach) > 100 THEN 'Cost Overrun'
+        WHEN l2 = 'REVENUE' AND AVG(year_to_date_ach) < 100 THEN 'Revenue Shortfall'
+        WHEN l2 = 'COE' AND AVG(year_to_date_ach) > 100 THEN 'Cost Overrun'
         ELSE 'Other Factor'
     END AS ebitda_drag
 FROM cfu_performance_data
 WHERE period = 202507 AND week_1_0_5___fm = 'FM' AND div = 'CFU WIB'
     AND l2 IN ('REVENUE', 'COE')
-    AND ((l2 = 'REVENUE' AND month_to_date_ach < 100) 
-         OR (l2 = 'COE' AND month_to_date_ach > 100))
+    AND ((l2 = 'REVENUE' AND year_to_date_ach < 100) 
+         OR (l2 = 'COE' AND year_to_date_ach > 100))
 GROUP BY div, l2, l3
 ORDER BY negative_impact DESC
 LIMIT 15;
@@ -389,8 +392,8 @@ SELECT
     div AS unit_name,
     l2 AS metric_type,
     l3 AS component,
-    ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
-    SUM(month_to_date_actual) - SUM(month_to_date_target) AS contribution,
+    ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd,
+    SUM(year_to_date_actual) - SUM(year_to_date_target) AS contribution,
     CASE 
         WHEN l2 = 'EBITDA' AND AVG(month_to_date_ach) > 100 THEN 'Core Business Success'
         WHEN l3 LIKE '%Depreciation%' AND AVG(month_to_date_ach) < 100 THEN 'Depreciation Savings'
@@ -424,8 +427,8 @@ SELECT
     div AS unit_name,
     l2 AS metric_type,
     l3 AS component,
-    ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
-    SUM(month_to_date_target) - SUM(month_to_date_actual) AS negative_impact,
+    ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd,
+    SUM(year_to_date_actual) - SUM(year_to_date_target) AS negative_impact,
     CASE 
         WHEN l2 = 'EBITDA' AND AVG(month_to_date_ach) < 100 THEN 'Core Business Issues'
         WHEN l3 LIKE '%Depreciation%' AND AVG(month_to_date_ach) > 100 THEN 'Higher Depreciation'
