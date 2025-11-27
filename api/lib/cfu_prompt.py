@@ -67,7 +67,7 @@ SELECT
     l4 AS category_l4,
     SUM(month_to_date_actual) AS actual_mtd,
     ROUND(AVG(month_to_date_ach), 2) AS achievement_mtd,
-    ROUND(AVG(gmom), 2) AS growth_mom
+    ROUND(AVG(gmom), 2) AS growth_mom,
     SUM(year_to_date_actual) AS actual_ytd,
     ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd,
     ROUND(AVG(gyoy), 2) AS growth_yoy
@@ -455,6 +455,7 @@ Rules:
 - Filter for: gmom < 0
 - Use latest period unless specified
 - Show product details with L3/L4 breakdown
+- Include YTD metrics for context
 - Order by worst growth first
 
 Reference pattern (Negative growth products):
@@ -464,7 +465,9 @@ SELECT
     l3 AS product_category,
     l4 AS product_detail,
     ROUND(AVG(gmom), 2) AS growth_mom_pct,
-    SUM(month_to_date_actual) AS actual_mtd
+    ROUND(AVG(gyoy), 2) AS growth_yoy_pct,
+    SUM(month_to_date_actual) AS actual_mtd,
+    SUM(year_to_date_actual) AS actual_ytd
 FROM cfu_performance_data
 WHERE period = 202507 AND week_1_0_5___fm = 'FM' AND div = 'CFU WIB'
     AND gmom < 0
@@ -514,7 +517,7 @@ Rules:
 - ALWAYS translate user's "unit" to "div" in WHERE clause
 - Focus on External Revenue only → check L3 or L4 containing "External"
 - Show detailed breakdown by L3 and L4 to identify specific external revenue streams
-- Must include: actual MTD, actual YTD, achievement MTD, growth MoM
+- Must include: actual MTD, actual YTD, achievement MTD, achievement YTD, growth MoM, growth YoY
 - Always filter week_1_0_5___fm = 'FM'
 - Order by actual MTD descending
 
@@ -525,8 +528,10 @@ SELECT
     l4 AS category_l4,
     SUM(month_to_date_actual) AS actual_mtd,
     SUM(year_to_date_actual) AS actual_ytd,
-    ROUND(AVG(month_to_date_ach), 2) AS achievement_pct,
-    ROUND(AVG(gmom), 2) AS growth_mom_pct
+    ROUND(AVG(month_to_date_ach), 2) AS achievement_mtd_pct,
+    ROUND(AVG(year_to_date_ach), 2) AS achievement_ytd_pct,
+    ROUND(AVG(gmom), 2) AS growth_mom_pct,
+    ROUND(AVG(gyoy), 2) AS growth_yoy_pct
 FROM cfu_performance_data
 WHERE period = 202507 
   AND week_1_0_5___fm = 'FM'
