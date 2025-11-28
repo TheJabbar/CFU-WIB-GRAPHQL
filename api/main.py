@@ -2,7 +2,7 @@ import os
 import sys
 import warnings
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from dotenv import load_dotenv
@@ -48,14 +48,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-async def get_context(api_key: str = get_api_key) -> dict:
-    """GraphQL context that provides API key validation"""
-    return {"api_key": api_key}
-
 # GraphQL router setup with WebSocket support for subscriptions
 graphql_app = GraphQLRouter(
     schema,
-    context_getter=get_context,
     graphiql=True,
     subscription_protocols=[
         "graphql-transport-ws",
@@ -66,7 +61,8 @@ graphql_app = GraphQLRouter(
 app.include_router(
     graphql_app,
     prefix="/cfu-insight",
-    tags=["GraphQL"]
+    tags=["GraphQL"],
+    dependencies=[Depends(get_api_key)]
 )
 
 # Health check endpoint

@@ -151,12 +151,6 @@ class Query:
         Resolver for generating insights with progress tracking.
         The intent is now fully handled within this backend logic.
         """
-        # Validate API key from context
-        context = info.context
-        if not context.get("api_key"):
-            logger.error("Unauthorized access attempt to get_insight")
-            raise Exception("API key validation failed")
-
         logger.info(f"GraphQL get_insight called with query: '{query}' and request_id: '{request_id}'")
 
         emit_progress(request_id, "init", "in_progress", "Memulai pemrosesan permintaan...")
@@ -208,38 +202,20 @@ class Query:
             raise
 
     @strawberry.field
-    async def recognize_intent(self, info: Info, query: str) -> Intent:
+    async def recognize_intent(self, query: str) -> Intent:
         """Resolver that uses LLM logic to detect the user's intent for text, chart, table, or simplified numbers."""
-        # Validate API key from context
-        context = info.context
-        if not context.get("api_key"):
-            logger.error("Unauthorized access attempt to recognize_intent")
-            raise Exception("API key validation failed")
-
         intent_dict = await get_intent_logic(query)
         return Intent(**intent_dict)
 
     @strawberry.field
-    async def get_topic(self, info: Info, chat_history: str) -> TopicResponse:
+    async def get_topic(self, chat_history: str) -> TopicResponse:
         """Resolver that generates a conversational topic from chat history."""
-        # Validate API key from context
-        context = info.context
-        if not context.get("api_key"):
-            logger.error("Unauthorized access attempt to get_topic")
-            raise Exception("API key validation failed")
-
         topic_text = await get_topic_logic(chat_history)
         return TopicResponse(output=topic_text)
 
     @strawberry.field
-    async def get_recommendation(self, info: Info, chat_history: str) -> RecommendationResponse:
+    async def get_recommendation(self, chat_history: str) -> RecommendationResponse:
         """Resolver that generates a recommendation or follow-up question from chat history."""
-        # Validate API key from context
-        context = info.context
-        if not context.get("api_key"):
-            logger.error("Unauthorized access attempt to get_recommendation")
-            raise Exception("API key validation failed")
-
         rec_text = await get_recommendation_logic(chat_history)
         return RecommendationResponse(output=rec_text)
 
@@ -249,7 +225,7 @@ class Subscription:
     """GraphQL Subscription for real-time progress updates."""
 
     @strawberry.subscription
-    async def progress_updates(self, info: Info, request_id: str) -> AsyncGenerator[ProgressUpdate, None]:
+    async def progress_updates(self, request_id: str) -> AsyncGenerator[ProgressUpdate, None]:
         """
         Subscribe to real-time progress updates for a specific request.
 
@@ -265,12 +241,6 @@ class Subscription:
             }
         }
         """
-        # Validate API key from context
-        context = info.context
-        if not context.get("api_key"):
-            logger.error("Unauthorized access attempt to progress_updates subscription")
-            raise Exception("API key validation failed")
-
         logger.info(f"Client subscribed to progress updates for request_id: {request_id}")
 
         # Create a queue for this subscriber
@@ -309,7 +279,7 @@ class Subscription:
             logger.info(f"Client unsubscribed from progress updates for request_id: {request_id}")
 
     @strawberry.subscription
-    async def insight_stream(self, info: Info, request_id: str) -> AsyncGenerator[InsightStreamChunk, None]:
+    async def insight_stream(self, request_id: str) -> AsyncGenerator[InsightStreamChunk, None]:
         """
         Subscribe to real-time streaming of insight text.
 
@@ -322,12 +292,6 @@ class Subscription:
             }
         }
         """
-        # Validate API key from context
-        context = info.context
-        if not context.get("api_key"):
-            logger.error("Unauthorized access attempt to insight_stream subscription")
-            raise Exception("API key validation failed")
-
         logger.info(f"Client subscribed to insight stream for request_id: {request_id}")
 
         # Create a queue for this subscriber
