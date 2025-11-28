@@ -2,12 +2,12 @@ import os
 import sys
 import warnings
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from dotenv import load_dotenv
 from loguru import logger
-from security import SecurityHeadersMiddleware
+from security import SecurityHeadersMiddleware, get_api_key
 from utils import load_initial_data
 from strawberry.fastapi import GraphQLRouter
 from graphql_schema import schema
@@ -32,8 +32,8 @@ async def lifespan(app: FastAPI):
 
 # FastAPI app
 app = FastAPI(
-    title="CFU WIB INSIGHT BOT API (GraphQL)",  
-    description="CFU WIB Insight Bot services using a FastAPI backend with a GraphQL layer.", 
+    title="CFU WIB INSIGHT BOT API (GraphQL)",
+    description="CFU WIB Insight Bot services using a FastAPI backend with a GraphQL layer.",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -48,13 +48,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+async def get_context(api_key: str = get_api_key) -> dict:
+    """GraphQL context that provides API key validation"""
+    return {"api_key": api_key}
+
 # GraphQL router setup with WebSocket support for subscriptions
 graphql_app = GraphQLRouter(
     schema,
-    graphiql=True, 
+    context_getter=get_context,
+    graphiql=True,
     subscription_protocols=[
-        "graphql-transport-ws",  
-        "graphql-ws" 
+        "graphql-transport-ws",
+        "graphql-ws"
     ]
 )
 

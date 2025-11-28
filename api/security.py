@@ -27,7 +27,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://fonts.googleapis.com; "
             "img-src 'self' data: https://fastapi.tiangolo.com; "
             "font-src 'self' https://fonts.gstatic.com data:; "
-            "connect-src 'self' http://localhost:5123 ws://localhost:5123;"
+            "connect-src 'self' http://localhost:5123 http://winscfuwibapi.dhiaul.my.id:5123 ws://localhost:5123 ;"
         )
         response.headers['Content-Security-Policy'] = csp_value
         

@@ -24,6 +24,11 @@ services:
       - ./api/requirements.txt:/app/requirements.txt
       - ./api/chart_generator.py:/app/chart_generator.py
     restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      # - "traefik.http.routers.about.middlewares=basicauth"
+      - "traefik.http.routers.winscfuwibapi.rule=Host(`winscfuwibapi.dhiaul.my.id`)"
+      - "traefik.http.services.winscfuwibapi.loadbalancer.server.port=5123" 
 
   # Chainlit Service
   cfu-wib-chainlit:

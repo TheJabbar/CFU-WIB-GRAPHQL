@@ -101,7 +101,7 @@ class InsightStreamChunk:
 def emit_progress(request_id: str, step: str, status: str, message: str, details: Optional[str] = None):
     """Emit progress update to all subscribers for this request_id."""
     from datetime import datetime
-    
+
     update = {
         "request_id": request_id,
         "step": step,
@@ -110,10 +110,10 @@ def emit_progress(request_id: str, step: str, status: str, message: str, details
         "timestamp": datetime.now().isoformat(),
         "details": details
     }
-    
+
     # Store in history
     progress_storage[request_id].append(update)
-    
+
     # Notify subscribers
     if request_id in progress_subscribers:
         for queue in progress_subscribers[request_id]:
@@ -151,12 +151,18 @@ class Query:
         Resolver for generating insights with progress tracking.
         The intent is now fully handled within this backend logic.
         """
+        # Validate API key from context
+        context = info.context
+        if not context.get("api_key"):
+            logger.error("Unauthorized access attempt to get_insight")
+            raise Exception("API key validation failed")
+
         logger.info(f"GraphQL get_insight called with query: '{query}' and request_id: '{request_id}'")
-        
+
         emit_progress(request_id, "init", "in_progress", "Memulai pemrosesan permintaan...")
 
         try:
-            
+
             # 1. Inspect requested fields
             requested_fields = {field.name for field in info.selected_fields[0].selections}
             logger.info(f"Requested fields: {requested_fields}")
@@ -180,7 +186,7 @@ class Query:
                     chart_type=result_dict.get("chart_type"),
                     chart_library=result_dict.get("chart_library")
                 )
-            
+
             intent_dict = result_dict.get("intent")
             intent_obj: Optional[Intent] = None
 
@@ -188,7 +194,7 @@ class Query:
                 intent_obj = Intent(**intent_dict)
 
             emit_progress(request_id, "complete", "completed", "Pemrosesan selesai!")
-            
+
             return InsightResponse(
                 output=result_dict.get("output"),
                 chart=chart_obj,
@@ -200,22 +206,40 @@ class Query:
             emit_progress(request_id, "error", "error", f"Terjadi kesalahan: {str(e)}")
             logger.error(f"Error in get_insight: {e}")
             raise
-    
+
     @strawberry.field
-    async def recognize_intent(self, query: str) -> Intent:
-        """Resolver that uses LLM logic to detect the user’s intent for text, chart, table, or simplified numbers."""
+    async def recognize_intent(self, info: Info, query: str) -> Intent:
+        """Resolver that uses LLM logic to detect the user's intent for text, chart, table, or simplified numbers."""
+        # Validate API key from context
+        context = info.context
+        if not context.get("api_key"):
+            logger.error("Unauthorized access attempt to recognize_intent")
+            raise Exception("API key validation failed")
+
         intent_dict = await get_intent_logic(query)
         return Intent(**intent_dict)
-    
+
     @strawberry.field
-    async def get_topic(self, chat_history: str) -> TopicResponse:
+    async def get_topic(self, info: Info, chat_history: str) -> TopicResponse:
         """Resolver that generates a conversational topic from chat history."""
+        # Validate API key from context
+        context = info.context
+        if not context.get("api_key"):
+            logger.error("Unauthorized access attempt to get_topic")
+            raise Exception("API key validation failed")
+
         topic_text = await get_topic_logic(chat_history)
         return TopicResponse(output=topic_text)
 
     @strawberry.field
-    async def get_recommendation(self, chat_history: str) -> RecommendationResponse:
+    async def get_recommendation(self, info: Info, chat_history: str) -> RecommendationResponse:
         """Resolver that generates a recommendation or follow-up question from chat history."""
+        # Validate API key from context
+        context = info.context
+        if not context.get("api_key"):
+            logger.error("Unauthorized access attempt to get_recommendation")
+            raise Exception("API key validation failed")
+
         rec_text = await get_recommendation_logic(chat_history)
         return RecommendationResponse(output=rec_text)
 
@@ -223,12 +247,12 @@ class Query:
 @strawberry.type
 class Subscription:
     """GraphQL Subscription for real-time progress updates."""
-    
+
     @strawberry.subscription
-    async def progress_updates(self, request_id: str) -> AsyncGenerator[ProgressUpdate, None]:
+    async def progress_updates(self, info: Info, request_id: str) -> AsyncGenerator[ProgressUpdate, None]:
         """
         Subscribe to real-time progress updates for a specific request.
-        
+
         Usage:
         subscription {
             progressUpdates(requestId: "unique-request-id") {
@@ -241,31 +265,37 @@ class Subscription:
             }
         }
         """
+        # Validate API key from context
+        context = info.context
+        if not context.get("api_key"):
+            logger.error("Unauthorized access attempt to progress_updates subscription")
+            raise Exception("API key validation failed")
+
         logger.info(f"Client subscribed to progress updates for request_id: {request_id}")
-        
+
         # Create a queue for this subscriber
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-        
+
         # Register this subscriber
         if request_id not in progress_subscribers:
             progress_subscribers[request_id] = []
         progress_subscribers[request_id].append(queue)
-        
+
         try:
             # Send any existing progress updates first
             if request_id in progress_storage:
                 for update in progress_storage[request_id]:
                     yield ProgressUpdate(**update)
-            
+
             # Then stream new updates
             while True:
                 update = await queue.get()
                 yield ProgressUpdate(**update)
-                
+
                 # If this is the final update, clean up
                 if update["status"] in ("completed", "error") and update["step"] in ("complete", "error"):
                     break
-                    
+
         except asyncio.CancelledError:
             logger.info(f"Subscription cancelled for request_id: {request_id}")
         finally:
@@ -277,12 +307,12 @@ class Subscription:
                 except ValueError:
                     pass
             logger.info(f"Client unsubscribed from progress updates for request_id: {request_id}")
-    
+
     @strawberry.subscription
-    async def insight_stream(self, request_id: str) -> AsyncGenerator[InsightStreamChunk, None]:
+    async def insight_stream(self, info: Info, request_id: str) -> AsyncGenerator[InsightStreamChunk, None]:
         """
         Subscribe to real-time streaming of insight text.
-        
+
         Usage:
         subscription {
             insightStream(requestId: "unique-request-id") {
@@ -292,16 +322,22 @@ class Subscription:
             }
         }
         """
+        # Validate API key from context
+        context = info.context
+        if not context.get("api_key"):
+            logger.error("Unauthorized access attempt to insight_stream subscription")
+            raise Exception("API key validation failed")
+
         logger.info(f"Client subscribed to insight stream for request_id: {request_id}")
-        
+
         # Create a queue for this subscriber
         queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
-        
+
         # Register this subscriber
         if request_id not in text_stream_subscribers:
             text_stream_subscribers[request_id] = []
         text_stream_subscribers[request_id].append(queue)
-        
+
         try:
             while True:
                 chunk_data = await queue.get()
@@ -310,11 +346,11 @@ class Subscription:
                     chunk=chunk_data["chunk"],
                     is_final=chunk_data.get("is_final", False)
                 )
-                
+
                 # If this is the final chunk, clean up
                 if chunk_data.get("is_final", False):
                     break
-                    
+
         except asyncio.CancelledError:
             logger.info(f"Insight stream subscription cancelled for request_id: {request_id}")
         finally:
