@@ -2,7 +2,7 @@ import os
 import sys
 import warnings
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from dotenv import load_dotenv
@@ -61,9 +61,35 @@ graphql_app = GraphQLRouter(
 app.include_router(
     graphql_app,
     prefix="/cfu-insight",
-    tags=["GraphQL"],
-    dependencies=[Depends(get_api_key)]
+    tags=["GraphQL"]
 )
+
+# Add middleware for API key validation
+@app.middleware("http")
+async def validate_api_key(request: Request, call_next):
+    if request.url.path.startswith("/cfu-insight"):
+        # Skip validation for health check
+        if request.url.path == "/ht":
+            return await call_next(request)
+
+        # For websocket connections, allow the connection to be established
+        # but authentication will be handled by GraphQL subscription validation
+        if "upgrade" in request.headers and request.headers["upgrade"].lower() == "websocket":
+            # WebSocket upgrade request - allow it to pass through to GraphQL
+            # The authentication will be handled in GraphQL subscription resolvers
+            pass
+        else:
+            # Validate API key for regular HTTP requests
+            api_key = request.headers.get("x-api-key")
+            if not api_key:
+                # If no API key provided, call get_api_key with None to trigger validation error
+                await get_api_key(None)
+            else:
+                # Validate the provided API key
+                await get_api_key(api_key)
+
+    response = await call_next(request)
+    return response
 
 # Health check endpoint
 @app.get("/ht", tags=["Health"])
