@@ -25,8 +25,6 @@ from lib.cfu_prompt import (
 )
 
 class Settings(BaseSettings):
-    # Load environment variables from .env file
-    load_dotenv(".env", override=True)
     x_api_key: str = Field(..., env="X_API_KEY")
     URL_CUSTOM_LLM: str = Field(..., env="URL_CUSTOM_LLM")
     TOKEN_CUSTOM_LLM: str = Field(..., env="TOKEN_CUSTOM_LLM")

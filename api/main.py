@@ -79,8 +79,9 @@ async def validate_api_key(request: Request, call_next):
             # The authentication will be handled in GraphQL subscription resolvers
             pass
         else:
-            # Validate API key for regular HTTP requests
+            # Validate API key for regular HTTP requests (POST, etc.)
             api_key = request.headers.get("x-api-key")
+            logger.debug(f"Received API Key: {api_key}")
             if not api_key:
                 # If no API key provided, call get_api_key with None to trigger validation error
                 await get_api_key(None)
