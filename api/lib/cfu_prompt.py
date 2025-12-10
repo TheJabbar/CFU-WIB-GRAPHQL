@@ -34,11 +34,13 @@ Rules:
   - L4 Aggregate: Filter `l5 = '-'`.
   - L5 Aggregate: Filter `l6 = '-'`.
 - Include both MTD and YTD for comprehensive view.
+- ALWAYS include `period` in the SELECT clause to identify the time of data.
 - Order by importance: REVENUE, COE, EBITDA, EBIT, EBT, NET INCOME.
 
 Reference pattern 1 (Specific Metric - e.g. Revenue):
 SELECT
     div AS unit_name,
+    period,
     l2 AS metric_type,
     l3 AS category_l3,
     l4 AS category_l4,
@@ -53,11 +55,12 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND div = 'TELIN'
     AND l2 = 'REVENUE' -- Filter ONLY for the requested metric
     AND l3 = '-'
-GROUP BY div, l2, l3, l4;
+GROUP BY period, div, l2, l3, l4;
 
 Reference pattern 2 (Full Performance Summary):
 SELECT
     div AS unit_name,
+    period,
     l2 AS metric_type,
     l3 AS category_l3,
     l4 AS category_l4,
@@ -72,7 +75,7 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND div = 'TELIN'
     AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'EBIT', 'EBT', 'NET INCOME') -- Include ALL metrics
     AND l3 = '-'
-GROUP BY div, l2, l3, l4
+GROUP BY period, div, l2, l3, l4
 ORDER BY CASE l2 
     WHEN 'REVENUE' THEN 1 
     WHEN 'COE' THEN 2 
@@ -108,8 +111,8 @@ Rules:
 
 Reference pattern (Monthly trend for specific division - Default L2):
 SELECT
-    period,
     div AS unit_name,
+    period,
     l2 AS metric_type,
     l3 AS category_l3,
     l4 AS category_l4,
@@ -157,8 +160,8 @@ Rules:
 
 Reference pattern (Comparison trend for division - Default L2):
 SELECT
-    period,
     div AS unit_name,
+    period,
     l2 AS metric_type,
     l3 AS category_l3,
     l4 AS category_l4,
@@ -186,10 +189,12 @@ Rules:
 - Use latest period (use subquery: SELECT MAX(period) FROM cfu_performance_data) unless specified.
 - Show detailed breakdown using L3/L4 levels (Filter l5 = '-' to get L4 items).
 - Limit results to top underperformers.
+- ALWAYS include `period` in the SELECT clause.
 
 Reference pattern (Underperforming products):
 SELECT
     div AS unit_name,
+    period,
     l2 AS main_category,
     l3 AS product_category, 
     l4 AS product_detail,
@@ -201,7 +206,7 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND div = 'TELIN'
     AND ach_ytd < 100 
     AND l5 = '-' -- Get L4 items
-GROUP BY div, l2, l3, l4
+GROUP BY period, div, l2, l3, l4
 ORDER BY achievement_ytd ASC
 LIMIT 20;
 '''
@@ -216,10 +221,12 @@ Rules:
 - Filter for: l2 = 'REVENUE' AND ach_ytd > 100.
 - Calculate positive gap: actual - target.
 - Order by largest gaps first.
+- ALWAYS include `period` in the SELECT clause.
 
 Reference pattern (Revenue success factors):
 SELECT
     div AS unit_name,
+    period,
     l3 AS product_category,
     l4 AS product_detail,
     ROUND(AVG(ach_ytd), 2) AS achievement_ytd,
@@ -230,7 +237,7 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND div = 'TELIN'
     AND l2 = 'REVENUE' AND ach_ytd > 100
     AND l5 = '-' -- Get L4 items
-GROUP BY div, l3, l4
+GROUP BY period, div, l3, l4
 ORDER BY (SUM(real_ytd) - SUM(target_ytd)) DESC
 LIMIT 15;
 '''
@@ -245,10 +252,12 @@ Rules:
 - Filter for: l2 = 'REVENUE' AND ach_ytd < 100.
 - Calculate negative gap: target - actual (shortfall).
 - Order by largest shortfalls first.
+- ALWAYS include `period` in the SELECT clause.
 
 Reference pattern (Revenue failure factors):
 SELECT
     div AS unit_name,
+    period,
     l3 AS product_category,
     l4 AS product_detail,
     ROUND(AVG(ach_ytd), 2) AS achievement_ytd,
@@ -259,7 +268,7 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND div = 'TELIN'
     AND l2 = 'REVENUE' AND ach_ytd < 100
     AND l5 = '-' -- Get L4 items
-GROUP BY div, l3, l4
+GROUP BY period, div, l3, l4
 ORDER BY (SUM(target_ytd) - SUM(real_ytd)) DESC
 LIMIT 15;
 '''
@@ -274,10 +283,12 @@ Rules:
 - Check Revenue products with achievement > 100%.
 - Check COE categories with achievement < 100% (cost savings).
 - EBITDA = Revenue - COE, so high revenue + low COE = good EBITDA.
+- ALWAYS include `period` in the SELECT clause.
 
 Reference pattern (EBITDA success factors):
 SELECT
     div AS unit_name,
+    period,
     l2 AS component_type,
     l3 AS category,
     ROUND(AVG(ach_ytd), 2) AS achievement_ytd,
@@ -294,7 +305,7 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND ((l2 = 'REVENUE' AND ach_ytd > 100) 
          OR (l2 = 'COE' AND ach_ytd < 100))
     AND l4 = '-' -- Get L3 items
-GROUP BY div, l2, l3
+GROUP BY period, div, l2, l3
 ORDER BY gap_mtd DESC
 LIMIT 15;
 '''
@@ -309,10 +320,12 @@ Rules:
 - Check Revenue products with achievement < 100% (revenue shortfall).
 - Check COE categories with achievement > 100% (cost overrun).
 - Focus on largest negative impacts.
+- ALWAYS include `period` in the SELECT clause.
 
 Reference pattern (EBITDA failure factors):
 SELECT
     div AS unit_name,
+    period,
     l2 AS component_type,
     l3 AS category,
     ROUND(AVG(ach_ytd), 2) AS achievement_ytd,
@@ -329,7 +342,7 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND ((l2 = 'REVENUE' AND ach_ytd < 100) 
          OR (l2 = 'COE' AND ach_ytd > 100))
     AND l4 = '-' -- Get L3 items
-GROUP BY div, l2, l3
+GROUP BY period, div, l2, l3
 ORDER BY negative_impact DESC
 LIMIT 15;
 '''
@@ -345,10 +358,12 @@ Rules:
 - Look for Depreciation/Amortization underperformance (cost savings).
 - Look for Other Income overperformance.
 - Use L3 level for detailed analysis.
+- ALWAYS include `period` in the SELECT clause.
 
 Reference pattern (Net Income success factors):
 SELECT
     div AS unit_name,
+    period,
     l2 AS metric_type,
     l3 AS component,
     ROUND(AVG(ach_ytd), 2) AS achievement_ytd,
@@ -366,7 +381,7 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND (l2 = 'EBITDA' OR l3 LIKE '%Depreciation%' OR l3 LIKE '%Amortization%' 
          OR l3 LIKE '%Other Income%')
     AND l4 = '-' -- Get L3 items
-GROUP BY div, l2, l3
+GROUP BY period, div, l2, l3
 ORDER BY contribution DESC
 LIMIT 15;
 '''
@@ -382,10 +397,12 @@ Rules:
 - Look for Depreciation/Amortization overruns.
 - Look for Other Income shortfalls.
 - Focus on largest negative impacts.
+- ALWAYS include `period` in the SELECT clause.
 
 Reference pattern (Net Income failure factors):
 SELECT
     div AS unit_name,
+    period,
     l2 AS metric_type,
     l3 AS component,
     ROUND(AVG(ach_ytd), 2) AS achievement_ytd,
@@ -403,7 +420,7 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND (l2 = 'EBITDA' OR l3 LIKE '%Depreciation%' OR l3 LIKE '%Amortization%' 
          OR l3 LIKE '%Other Income%')
     AND l4 = '-' -- Get L3 items
-GROUP BY div, l2, l3
+GROUP BY period, div, l2, l3
 ORDER BY negative_impact DESC
 LIMIT 15;
 '''
@@ -420,10 +437,12 @@ Rules:
 - Show product details with L3/L4 breakdown.
 - Include YTD metrics for context.
 - Order by worst growth first.
+- ALWAYS include `period` in the SELECT clause.
 
 Reference pattern (Negative growth products):
 SELECT
     div AS unit_name,
+    period,
     l2 AS category,
     l3 AS product_category,
     l4 AS product_detail,
@@ -436,7 +455,7 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND div = 'TELIN'
     AND mom < 0
     AND l5 = '-' -- Get L4 items
-GROUP BY div, l2, l3, l4
+GROUP BY period, div, l2, l3, l4
 ORDER BY growth_mom_pct ASC
 LIMIT 20;
 '''
@@ -451,10 +470,12 @@ Rules:
 - Check Revenue products with negative growth (mom < 0).
 - Check COE categories with positive growth (mom > 0) - increasing costs.
 - Focus on significant contributors.
+- ALWAYS include `period` in the SELECT clause.
 
 Reference pattern (EBITDA negative growth analysis):
 SELECT
     div AS unit_name,
+    period,
     l2 AS component_type,
     l3 AS category,
     ROUND(AVG(mom), 2) AS growth_mom_pct,
@@ -470,7 +491,7 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND l2 IN ('REVENUE', 'COE')
     AND ((l2 = 'REVENUE' AND mom < 0) OR (l2 = 'COE' AND mom > 0))
     AND l4 = '-' -- Get L3 items
-GROUP BY div, l2, l3
+GROUP BY period, div, l2, l3
 ORDER BY ABS(growth_mom_pct) DESC
 LIMIT 15;
 '''
@@ -486,10 +507,12 @@ Rules:
 - Show detailed breakdown by L3 and L4 to identify specific external revenue streams.
 - Must include: actual MTD, actual YTD, achievement MTD, achievement YTD, growth MoM, growth YoY.
 - Order by actual MTD descending.
+- ALWAYS include `period` in the SELECT clause.
 
 Reference pattern (External Revenue breakdown):
 SELECT
     div AS unit_name,
+    period,
     l3 AS category_l3,
     l4 AS category_l4,
     SUM(real_mtd) AS actual_mtd,
@@ -503,7 +526,7 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
   AND div = 'TELIN'
   AND (l3 LIKE '%External%' OR l4 LIKE '%External%')
   AND l5 = '-' -- Get L4 items
-GROUP BY div, l3, l4
+GROUP BY period, div, l3, l4
 ORDER BY actual_mtd DESC;
 '''
 
@@ -521,8 +544,8 @@ Rules:
 
 Reference pattern (External Revenue trend):
 SELECT
-    period,
     div AS unit_name,
+    period,
     SUM(real_mtd) AS actual_mtd,
     SUM(target_mtd) AS target_mtd,
     SUM(prev_month) AS prev_year_mtd

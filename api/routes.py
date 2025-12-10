@@ -325,6 +325,10 @@ def _calculate_summary_row(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any
         if k == first_text_col:
             continue
             
+        # Skip period column from summation
+        if k.lower() == 'period':
+            continue
+
         # Check if it's a ratio column
         if any(kw in k.lower() for kw in ratio_keywords):
             continue
