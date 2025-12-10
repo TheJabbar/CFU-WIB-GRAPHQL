@@ -3,6 +3,7 @@ import sqlite3
 import pandas as pd
 from typing import List, Dict, Any
 from loguru import logger
+from pathlib import Path
 
 def get_db_connection(db_path: str):
     """Creates and returns a database connection with row factory for dict-like rows."""
@@ -45,83 +46,103 @@ def execute_query(db_path: str, query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error executing query '{query}': {e}")
         raise
 
-def _normalize_period(sheet_name: str) -> str:
+def insert_xlsx_to_db(data_path: str, db_path: str, tables_config: List[Dict[str, Any]] = None) -> None:
     """
-    Normalizes sheet name into a consistent period format (e.g., 'Jan24').
-    """
-    try:
-        return pd.to_datetime(sheet_name, format='%m%Y').strftime('%b%y')
-    except ValueError:
-        try:
-            return pd.to_datetime(sheet_name, format='%b%y').strftime('%b%y')
-        except ValueError:
-            logger.warning(f"Could not parse period from sheet name: {sheet_name}")
-            return sheet_name
-
-def insert_xlsx_to_db(data_path: str, db_path: str, tables_config: List[Dict[str, Any]]) -> None:
-    """
-    Reads data from multiple Excel files and sheets as defined in the config,
-    handles multi-row headers, normalizes period, combines them, and saves
-    them into a single table in SQLite.
+    Converts Excel files in the data directory to a SQLite database.
+    Uses tables_config to determine which files to load and how to map them to tables.
     """
     logger.info(f"Starting Excel to DB loading process for: {db_path}")
+    
+    # Ensure directory exists
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    
+    # Remove existing DB to start fresh
+    if os.path.exists(db_path):
+        try:
+            os.remove(db_path)
+            logger.info(f"Removed existing database: {db_path}")
+        except Exception as e:
+            logger.warning(f"Could not remove existing database: {e}")
+
+    data_dir = Path(data_path)
+    if not data_dir.exists():
+        logger.error(f"Data directory '{data_path}' does not exist.")
+        return
 
     try:
         with get_db_connection(db_path) as conn:
-            for config in tables_config:
-                table_name = config["table_name"]
-                sources = config.get("sources", [])
-                
-                if not sources:
-                    logger.warning(f"Skipping table '{table_name}' due to missing 'sources' config.")
-                    continue
-
-                all_dataframes = []
-
-                for source in sources:
-                    excel_file_name = source.get("file_name")
-                    sheet_list = source.get("sheet_names")
-
-                    if not excel_file_name or not sheet_list:
-                        logger.warning(f"Skipping a source in '{table_name}' due to missing config.")
-                        continue
-
-                    file_path = os.path.join(data_path, excel_file_name)
+            if tables_config:
+                for table_cfg in tables_config:
+                    table_name = table_cfg.get("table_name", "cfu_performance_data")
+                    sources = table_cfg.get("sources", [])
                     
-                    if not os.path.isfile(file_path):
-                        logger.error(f"Excel file not found: {file_path}")
-                        continue
+                    first_chunk = True
+                    
+                    for source in sources:
+                        file_name = source.get("file_name")
+                        sheet_names = source.get("sheet_names", [])
+                        
+                        if not file_name:
+                            continue
 
-                    for sheet_name in sheet_list:
+                        file_path = data_dir / file_name
+                        if not file_path.exists():
+                            logger.warning(f"File not found: {file_name}")
+                            continue
+                            
+                        logger.info(f"Processing {file_name} for table {table_name}...")
+                        
                         try:
-                            df = pd.read_excel(file_path, sheet_name=sheet_name, header=[0, 1])
+                            xl_file = pd.ExcelFile(file_path)
+                            available_sheets = xl_file.sheet_names
                             
-                            new_columns = []
-                            for col in df.columns:
-                                level1 = str(col[0]).lower().replace(' ', '_').replace('.', '')
-                                level2 = str(col[1]).lower().replace(' ', '_').replace('.', '')
-                                if 'unnamed' in level1: new_col = level2
-                                elif 'unnamed' in level2: new_col = level1
-                                else: new_col = f"{level1}_{level2}"
-                                new_col = new_col.replace('(', '').replace(')', '').replace('/', '_').replace('-', '_')
-                                new_columns.append(new_col)
-                            df.columns = new_columns
+                            # If sheet_names is empty, use all available sheets
+                            sheets_to_load = sheet_names if sheet_names else available_sheets
                             
-                            df['period_source'] = _normalize_period(sheet_name)
-                            
-                            all_dataframes.append(df)
-                            logger.debug(f"Successfully processed {len(df)} rows from sheet '{sheet_name}' in '{excel_file_name}'")
+                            for sheet in sheets_to_load:
+                                if sheet not in available_sheets:
+                                    logger.warning(f"Sheet '{sheet}' not found in {file_name}")
+                                    continue
+                                    
+                                logger.info(f"Loading sheet: {sheet}")
+                                df = pd.read_excel(file_path, sheet_name=sheet)
+                                
+                                # Clean columns
+                                df.columns = [str(col).replace(" ", "_").replace("-", "_") for col in df.columns]
+                                
+                                # Write to DB
+                                if_exists_mode = 'replace' if first_chunk else 'append'
+                                df.to_sql(table_name, conn, if_exists=if_exists_mode, index=False)
+                                logger.success(f"Wrote {len(df)} rows to '{table_name}' (Mode: {if_exists_mode})")
+                                first_chunk = False
+                                
                         except Exception as e:
-                            logger.error(f"Failed to process sheet '{sheet_name}' from '{excel_file_name}': {e}")
+                            logger.error(f"Error processing {file_name}: {e}")
+            else:
+                # Fallback: Process all Excel files if no config provided
+                logger.warning("No tables_config provided. Processing all Excel files found.")
+                excel_files = list(data_dir.glob("*.xlsx")) + list(data_dir.glob("*.xls"))
                 
-                if all_dataframes:
-                    final_df = pd.concat(all_dataframes, ignore_index=True)
-                    final_df.to_sql(table_name, conn, if_exists='replace', index=False)
-                    logger.success(f"Successfully inserted {len(final_df)} total rows from {len(sources)} source(s) into table '{table_name}'.")
-                else:
-                    logger.warning(f"No dataframes were loaded to insert into table '{table_name}'.")
+                if not excel_files:
+                    logger.error(f"No Excel files found in '{data_path}'.")
+                    return
+
+                for excel_file in excel_files:
+                    logger.info(f"Processing {excel_file.name}...")
+                    try:
+                        xl_file = pd.ExcelFile(excel_file)
+                        for sheet_name in xl_file.sheet_names:
+                            table_name = f"{excel_file.stem}_{sheet_name}".replace(" ", "_").replace("-", "_")
+                            df = pd.read_excel(excel_file, sheet_name=sheet_name)
+                            df.columns = [str(col).replace(" ", "_").replace("-", "_") for col in df.columns]
+                            df.to_sql(table_name, conn, if_exists='replace', index=False)
+                            logger.success(f"Created table '{table_name}'")
+                    except Exception as e:
+                        logger.error(f"Error processing {excel_file.name}: {e}")
+
+            conn.commit()
+            logger.success(f"Database successfully created at {db_path}")
 
     except Exception as e:
-        logger.error(f"Critical failure during Excel insertion: {e}")
+        logger.error(f"Error processing Excel files: {e}")
         raise

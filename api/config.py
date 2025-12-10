@@ -45,12 +45,8 @@ class Settings(BaseSettings):
             ),
             "sources": [
                 {
-                    "file_name": "Format_Upload Radir_Sampel.xlsx",
-                    "sheet_names": ["Jan25", "Feb25", "Mar25", "Apr25", "Mei25", "Jun25", "Jul25"],
-                },
-                {
-                    "file_name": "Sampel_Upload Radir CFU WIB_2024.xlsx", 
-                    "sheet_names": ["012024", "022024", "032024", "042024", "052024", "062024", "072024", "082024", "092024", "102024", "112024", "122024"], 
+                    "file_name": "telkomshareddp-dbv_cfuwibs_financial_performance-1765163852098.xlsx",
+                    "sheet_names": [], # Empty list implies all sheets or auto-detection
                 }
             ]
         }
@@ -65,17 +61,17 @@ class Settings(BaseSettings):
         },
         {
             "prompt_name": "CFU Monthly Performance Analysis",
-            "prompt_description": "Analyze division performance for specific period showing Revenue, COE, EBITDA, Net Income with achievement and growth (MTD/YTD).",
+            "prompt_description": "Analyze division performance for specific period showing Revenue, COE, EBITDA, EBIT, EBT, Net Income with achievement and growth (MTD/YTD).",
             "instruction_prompt": monthly_performance_prompt,
         },
         {
             "prompt_name": "CFU Trend Analysis",
-            "prompt_description": "Show Revenue/COE/EBITDA/Net Income trends over multiple periods for specific division with monthly breakdown.",
+            "prompt_description": "Show Revenue/COE/EBITDA/EBIT/EBT/Net Income trends over multiple periods for specific division with monthly breakdown.",
             "instruction_prompt": trend_analysis_prompt,
         },
         {
             "prompt_name": "CFU Comparison Trend Analysis", 
-            "prompt_description": "Display trend comparison of actual vs target vs previous year for Revenue/COE/EBITDA/Net Income over time periods.",
+            "prompt_description": "Display trend comparison of actual vs target vs previous year for Revenue/COE/EBITDA/EBIT/EBT/Net Income over time periods.",
             "instruction_prompt": comparison_trend_prompt,
         },
         {

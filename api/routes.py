@@ -300,7 +300,7 @@ def _calculate_summary_row(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any
     
     # Identify columns to sum
     # We sum columns that are numeric and NOT percentages/ratios
-    ratio_keywords = ['pct', 'ach', 'growth', 'margin', 'ratio', 'percent', 'rate']
+    ratio_keywords = ['pct', 'ach', 'growth', 'margin', 'ratio', 'percent', 'rate', 'mom', 'yoy']
     
     # We need to find the first text column to put "TOTAL"
     first_text_col = None
@@ -365,10 +365,12 @@ def _clean_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         is_empty = True
         for row in rows:
             val = row.get(key)
-            # Check for None, empty string, or string "None" (just in case)
-            if val is not None and str(val).strip() != "" and str(val).lower() != "none":
-                is_empty = False
-                break
+            # Check for None, empty string, string "None", or "-" (aggregation marker)
+            if val is not None:
+                s_val = str(val).strip()
+                if s_val != "" and s_val.lower() != "none" and s_val != "-":
+                    is_empty = False
+                    break
         if is_empty:
             empty_keys.add(key)
             
@@ -377,6 +379,11 @@ def _clean_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         new_row = {}
         for k, v in row.items():
             if k in empty_keys:
+                continue
+            
+            # Format mom and yoy as percentage if numeric
+            if k in ['mom', 'yoy'] and isinstance(v, (int, float)):
+                new_row[k] = f"{v:.2f}%"
                 continue
             
             # Replace 0 or None with "-"
@@ -539,7 +546,8 @@ async def get_insight_logic(
         emit("query", "in_progress", "Menjalankan query ke database...")
         rows = await execute_sql_query(generated_sql, column_list)
         emit("query", "completed", f"Query berhasil - {len(rows)} baris data ditemukan")
-        last_rows = rows
+        # Create a copy for chart generation (without summary row)
+        last_rows = list(rows)
 
         # Calculate summary row before cleaning
         if rows:
