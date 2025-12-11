@@ -561,7 +561,8 @@ async def get_insight_logic(
             data_cols = list(display_rows[0].keys()) if display_rows else []
             table_data_json = json.dumps({
                 "columns": data_cols,
-                "rows": display_rows
+                "rows": display_rows,
+                "wantsSimplifiedNumbers": intent_dict.get("wants_simplified_numbers", True)
             })
             emit("table_ready", "completed", "Tabel data siap ditampilkan", details=table_data_json)
 
