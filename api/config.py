@@ -24,6 +24,7 @@ from lib.cfu_prompt import (
     external_revenue_trend_prompt,
     top_contributing_segments_prompt,
     revenue_proportion_analysis_prompt,
+    revenue_growth_analysis_prompt,
 )
 from lib.general_q_prompt import cfu_wib_prompt
 
@@ -146,6 +147,11 @@ class Settings(BaseSettings):
             "prompt_name": "CFU Revenue Proportion Analysis",
             "prompt_description": "Calculate the proportion of revenue for a specific unit against total CFU WIB revenue and analyze trends over time.",
             "instruction_prompt": revenue_proportion_analysis_prompt,
+        },
+        {
+            "prompt_name": "CFU Revenue Growth Analysis (Comprehensive)",
+            "prompt_description": "Comprehensive revenue growth analysis covering MoM and YoY revenue analysis for CFU WIB and all individual units, including checking for declines and increases in revenue by product.",
+            "instruction_prompt": revenue_growth_analysis_prompt,
         }
     ]
 
