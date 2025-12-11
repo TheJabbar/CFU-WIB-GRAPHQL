@@ -454,6 +454,12 @@ async def main(message: cl.Message):
         wants_text = intent_from_backend.get("wantsText", True)
         wants_table = intent_from_backend.get("wantsTable", True)
 
+        # FIX: Ensure table is displayed if streaming missed it (e.g. race condition or fast response)
+        if streamed_text and table_md and "### Data Hasil Analisis" not in streaming_msg.content:
+             current_text = streaming_msg.content
+             streaming_msg.content = f"### Data Hasil Analisis\n\n{table_md}\n\n### Insight\n\n{current_text}"
+             await streaming_msg.update()
+
         # Add chart at the end (after table and streaming text)
         elements = []
         if isinstance(chart_info, dict) and chart_info.get("chart"):
