@@ -276,6 +276,7 @@ async def subscribe_to_progress(request_id: str, progress_step: cl.Step, shared_
                         if rows and columns:
                             shared_data["table_columns"] = columns
                             shared_data["table_rows"] = rows
+                            shared_data["wantsSimplifiedNumbers"] = table_data.get("wantsSimplifiedNumbers", True)
                             shared_data["table_ready"] = True
                     except Exception as table_err:
                         _debug(f"Error parsing table data: {table_err}")
@@ -322,7 +323,9 @@ async def subscribe_to_insight_stream(request_id: str, streaming_msg: cl.Message
 
                 # Display table first if available and not yet displayed
                 if not table_displayed and shared_data.get("table_ready"):
-                    formatter = format_number_simplified
+                    wants_simplified = shared_data.get("wantsSimplifiedNumbers", True)
+                    formatter = format_number_simplified if wants_simplified else format_number_full
+                    
                     table_md = rows_to_markdown_table(
                         shared_data.get("table_rows", []),
                         shared_data.get("table_columns", []),
@@ -337,10 +340,13 @@ async def subscribe_to_insight_stream(request_id: str, streaming_msg: cl.Message
                     accumulated_text += chunk
                     # Update message content in real-time
                     if table_displayed:
+                        wants_simplified = shared_data.get("wantsSimplifiedNumbers", True)
+                        formatter = format_number_simplified if wants_simplified else format_number_full
+                        
                         table_md = rows_to_markdown_table(
                             shared_data.get("table_rows", []),
                             shared_data.get("table_columns", []),
-                            formatter=format_number_simplified
+                            formatter=formatter
                         )
                         streaming_msg.content = f"### Data Hasil Analisis\n\n{table_md}\n\n### Insight\n\n{accumulated_text}"
                     else:
@@ -453,6 +459,12 @@ async def main(message: cl.Message):
         # Check the intent from the backend to understand what the user wants.
         wants_text = intent_from_backend.get("wantsText", True)
         wants_table = intent_from_backend.get("wantsTable", True)
+
+        # FIX: Ensure table is displayed if streaming missed it (e.g. race condition or fast response)
+        if streamed_text and table_md and "### Data Hasil Analisis" not in streaming_msg.content:
+             current_text = streaming_msg.content
+             streaming_msg.content = f"### Data Hasil Analisis\n\n{table_md}\n\n### Insight\n\n{current_text}"
+             await streaming_msg.update()
 
         # Add chart at the end (after table and streaming text)
         elements = []

@@ -390,8 +390,8 @@ def _clean_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 new_row[k] = f"{v:.2f}%"
                 continue
             
-            # Replace 0 or None with "-"
-            if v is None or (isinstance(v, (int, float)) and v == 0):
+            # Replace None with "-"
+            if v is None:
                 new_row[k] = "-"
             else:
                 new_row[k] = v
@@ -553,12 +553,6 @@ async def get_insight_logic(
         # Create a copy for chart generation (without summary row)
         last_rows = list(rows)
 
-        # Calculate summary row before cleaning
-        if rows:
-            summary_row = _calculate_summary_row(rows)
-            if summary_row:
-                rows.append(summary_row)
-
         # Clean rows for display (remove empty columns like category_l3/l4 if they are null)
         display_rows = _clean_rows_for_display(rows)
 
@@ -567,38 +561,52 @@ async def get_insight_logic(
             data_cols = list(display_rows[0].keys()) if display_rows else []
             table_data_json = json.dumps({
                 "columns": data_cols,
-                "rows": display_rows
+                "rows": display_rows,
+                "wantsSimplifiedNumbers": intent_dict.get("wants_simplified_numbers", True)
             })
             emit("table_ready", "completed", "Tabel data siap ditampilkan", details=table_data_json)
 
         if "output" in requested_fields:
-            emit("insight", "in_progress", "Menghasilkan insight dari data...")
-            
-            # Define streaming callback
-            async def stream_callback(chunk: str):
-                try:
-                    from graphql_schema import emit_text_stream
-                    emit_text_stream(request_id, chunk, is_final=False)
-                except ImportError:
-                    pass
-            
-            insight_text = await generate_insight(
-                table_name=table_name, columns_list=column_list, table_data=rows,
-                user_query=action_input, instruction_prompt=instruction_prompt,
-                intent=intent_dict,
-                stream=True if request_id else False,
-                stream_callback=stream_callback if request_id else None
-            )
-            
-            # Emit final chunk
-            if request_id:
-                try:
-                    from graphql_schema import emit_text_stream
-                    emit_text_stream(request_id, "", is_final=True)
-                except ImportError:
-                    pass
-            
-            emit("insight", "completed", "Insight teks berhasil dibuat")
+            if intent_dict.get("wants_text", True):
+                emit("insight", "in_progress", "Menghasilkan insight dari data...")
+                
+                # Define streaming callback
+                async def stream_callback(chunk: str):
+                    try:
+                        from graphql_schema import emit_text_stream
+                        emit_text_stream(request_id, chunk, is_final=False)
+                    except ImportError:
+                        pass
+                
+                insight_text = await generate_insight(
+                    table_name=table_name, columns_list=column_list, table_data=rows,
+                    user_query=action_input, instruction_prompt=instruction_prompt,
+                    intent=intent_dict,
+                    stream=True if request_id else False,
+                    stream_callback=stream_callback if request_id else None
+                )
+                
+                # Emit final chunk
+                if request_id:
+                    try:
+                        from graphql_schema import emit_text_stream
+                        emit_text_stream(request_id, "", is_final=True)
+                    except ImportError:
+                        pass
+                
+                emit("insight", "completed", "Insight teks berhasil dibuat")
+            else:
+                logger.info("User requested no text output (wants_text=False). Skipping insight generation.")
+                insight_text = "Berikut adalah data yang Anda minta."
+                
+                # Emit final chunk to close stream
+                if request_id:
+                    try:
+                        from graphql_schema import emit_text_stream
+                        emit_text_stream(request_id, insight_text, is_final=True)
+                    except ImportError:
+                        pass
+                emit("insight", "completed", "Insight teks dilewati (sesuai permintaan)")
         else:
             insight_text = "Data berhasil diambil."
         
