@@ -22,7 +22,10 @@ from lib.cfu_prompt import (
     ebitda_negative_growth_prompt,
     external_revenue_prompt,
     external_revenue_trend_prompt,
+    top_contributing_segments_prompt,
+    revenue_proportion_analysis_prompt,
 )
+from lib.general_q_prompt import cfu_wib_prompt
 
 class Settings(BaseSettings):
     x_api_key: str = Field(..., env="X_API_KEY")
@@ -70,7 +73,7 @@ class Settings(BaseSettings):
             "instruction_prompt": trend_analysis_prompt,
         },
         {
-            "prompt_name": "CFU Comparison Trend Analysis", 
+            "prompt_name": "CFU Comparison Trend Analysis",
             "prompt_description": "Display trend comparison of actual vs target vs previous year for Revenue/COE/EBITDA/EBIT/EBT/Net Income over time periods.",
             "instruction_prompt": comparison_trend_prompt,
         },
@@ -85,7 +88,7 @@ class Settings(BaseSettings):
             "instruction_prompt": revenue_success_analysis_prompt,
         },
         {
-            "prompt_name": "CFU Revenue Failure Analysis", 
+            "prompt_name": "CFU Revenue Failure Analysis",
             "prompt_description": "Analyze why revenue performance failed by finding products with <100% achievement and largest negative gaps.",
             "instruction_prompt": revenue_failure_analysis_prompt,
         },
@@ -129,6 +132,21 @@ class Settings(BaseSettings):
             "prompt_description": "Show External Revenue trend comparison of actual vs target vs previous year over multiple periods.",
             "instruction_prompt": external_revenue_trend_prompt,
         },
+        {
+            "prompt_name": "CFU WIB General Information",
+            "prompt_description": "Provides general information about CFU WIB including its definition and components.",
+            "instruction_prompt": cfu_wib_prompt,
+        },
+        {
+            "prompt_name": "CFU Top Contributing Segments Analysis",
+            "prompt_description": "Identify which business segments/divisions provide the largest contribution to Revenue, COE, and EBITDA for CFU WIB.",
+            "instruction_prompt": top_contributing_segments_prompt,
+        },
+        {
+            "prompt_name": "CFU Revenue Proportion Analysis",
+            "prompt_description": "Calculate the proportion of revenue for a specific unit against total CFU WIB revenue and analyze trends over time.",
+            "instruction_prompt": revenue_proportion_analysis_prompt,
+        }
     ]
 
     class Config:
@@ -144,7 +162,7 @@ class Settings(BaseSettings):
         for prompt_entry in self.prompt_config:
             if prompt_entry.get("prompt_name") == prompt_name:
                 return prompt_entry.get("instruction_prompt")
-        
+
         logger.warning(
             f"Prompt '{prompt_name}' not found in config. Falling back to generic SQL creation."
         )

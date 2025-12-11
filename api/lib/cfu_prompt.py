@@ -105,13 +105,13 @@ WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
     AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'EBIT', 'EBT', 'NET INCOME') -- Include ALL metrics
     AND l3 = '-'
 GROUP BY period, div, l2, l3, l4
-ORDER BY CASE l2 
-    WHEN 'REVENUE' THEN 1 
-    WHEN 'COE' THEN 2 
-    WHEN 'EBITDA' THEN 3 
+ORDER BY CASE l2
+    WHEN 'REVENUE' THEN 1
+    WHEN 'COE' THEN 2
+    WHEN 'EBITDA' THEN 3
     WHEN 'EBIT' THEN 4
     WHEN 'EBT' THEN 5
-    WHEN 'NET INCOME' THEN 6 
+    WHEN 'NET INCOME' THEN 6
     ELSE 7 END;
 '''
 
@@ -154,17 +154,17 @@ SELECT
     SUM(real_mtd) AS real_mtd
 FROM cfu_performance_data
 WHERE period >= (SELECT MIN(period) FROM (SELECT DISTINCT period FROM cfu_performance_data ORDER BY period DESC LIMIT 6))
-    AND div = 'TELIN' 
+    AND div = 'TELIN'
     AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'EBIT', 'EBT', 'NET INCOME') -- CHANGE THIS if user asks for specific metric
     AND l3 = '-' -- Get L2 Aggregate
 GROUP BY period, div, l2, l3, l4
-ORDER BY period ASC, CASE l2 
-    WHEN 'REVENUE' THEN 1 
-    WHEN 'COE' THEN 2 
-    WHEN 'EBITDA' THEN 3 
+ORDER BY period ASC, CASE l2
+    WHEN 'REVENUE' THEN 1
+    WHEN 'COE' THEN 2
+    WHEN 'EBITDA' THEN 3
     WHEN 'EBIT' THEN 4
     WHEN 'EBT' THEN 5
-    WHEN 'NET INCOME' THEN 6 
+    WHEN 'NET INCOME' THEN 6
     ELSE 7 END;
 '''
 
@@ -207,7 +207,7 @@ SELECT
     SUM(prev_year) AS prev_year -- Note: Using prev_year column
 FROM cfu_performance_data
 WHERE period >= (SELECT MIN(period) FROM (SELECT DISTINCT period FROM cfu_performance_data ORDER BY period DESC LIMIT 6))
-    AND div = 'TELIN' 
+    AND div = 'TELIN'
     AND l2 IN ('REVENUE', 'COE', 'EBITDA', 'EBIT', 'EBT', 'NET INCOME') -- CHANGE THIS if user asks for specific metric
     AND l3 = '-' -- Get L2 Aggregate
 GROUP BY period, div, l2, l3, l4
@@ -794,6 +794,155 @@ WHERE period >= (SELECT MIN(period) FROM (SELECT DISTINCT period FROM cfu_perfor
     AND (l2 = 'REVENUE')
     AND (l3 LIKE '%External%' OR l4 LIKE '%External%')
     AND l5 = '-' -- Get L4 items
+GROUP BY period, div
+ORDER BY period ASC;
+'''
+
+top_contributing_segments_prompt = '''
+Task: Find the business segments/divisions that contribute the most to Revenue, COE, EBITDA, and Net Income for CFU WIB by analyzing actual values and their percentages against the total.
+
+CRITICAL USER MAPPING: When user says "unit", they mean "div" (division) in database!
+
+Rules:
+- ALWAYS translate user's "unit" to "div" in WHERE clause.
+- CFU WIB HANDLING (CRITICAL):
+    - IF user says "CFU WIB", aggregate across all divisions to show each unit's contribution.
+- Focus on identifying top contributing business segments per metric (Revenue, COE, EBITDA, Net Income).
+- Use latest period (use subquery: SELECT MAX(period) FROM cfu_performance_data) unless specified.
+- Must handle queries for:
+  - "which segment contributes most to revenue?" → Calculate actual revenue for each unit and percentage of total CFU WIB revenue
+  - "which unit gives highest COE?" → Calculate actual COE for each unit and percentage of total CFU WIB COE
+  - "which business unit has highest EBITDA contribution?" → Calculate actual EBITDA for each unit and percentage of total CFU WIB EBITDA
+  - "Segmen / Unit bisnis apa yang memberikan kontribusi Net Income terbesar untuk CFU WIB?" → Calculate actual Net Income for each unit and percentage of total CFU WIB Net Income
+- For each metric, show: unit name, actual value, and percentage of total.
+- Calculate percentages by dividing each unit's actual by the total for all divisions combined.
+- HIERARCHY LOGIC (Crucial):
+  - L2 Aggregate: Filter `l3 = '-'`.
+  - L3 Aggregate: Filter `l4 = '-'`.
+- ORDER BY actual value descending to show highest contributors first.
+- ALWAYS include `period` in the SELECT clause.
+
+Reference pattern (Top contributing segments with percentages):
+-- Calculate actual revenue for each unit and percentage of total CFU WIB revenue
+SELECT
+    div AS unit_name,
+    SUM(real_mtd) AS actual_value,
+    ROUND(SUM(real_mtd) * 100.0 / (SELECT SUM(real_mtd) FROM cfu_performance_data WHERE period = (SELECT MAX(period) FROM cfu_performance_data) AND l2 = 'REVENUE' AND l3 = '-' AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')), 2) AS percentage_of_total
+FROM cfu_performance_data
+WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+    AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT') -- Only valid divisions for CFU WIB
+    AND l2 = 'REVENUE' -- For revenue analysis
+    AND l3 = '-' -- Get L2 aggregates
+GROUP BY period, div
+ORDER BY actual_value DESC;
+
+-- Calculate actual COE for each unit and percentage of total CFU WIB COE
+SELECT
+    div AS unit_name,
+    SUM(real_mtd) AS actual_value,
+    ROUND(SUM(real_mtd) * 100.0 / (SELECT SUM(real_mtd) FROM cfu_performance_data WHERE period = (SELECT MAX(period) FROM cfu_performance_data) AND l2 = 'COE' AND l3 = '-' AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')), 2) AS percentage_of_total
+FROM cfu_performance_data
+WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+    AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT') -- Only valid divisions for CFU WIB
+    AND l2 = 'COE' -- For COE analysis
+    AND l3 = '-' -- Get L2 aggregates
+GROUP BY period, div
+ORDER BY actual_value DESC;
+
+-- Calculate actual EBITDA for each unit and percentage of total CFU WIB EBITDA
+SELECT
+    div AS unit_name,
+    SUM(real_mtd) AS actual_value,
+    ROUND(SUM(real_mtd) * 100.0 / (SELECT SUM(real_mtd) FROM cfu_performance_data WHERE period = (SELECT MAX(period) FROM cfu_performance_data) AND l2 = 'EBITDA' AND l3 = '-' AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')), 2) AS percentage_of_total
+FROM cfu_performance_data
+WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+    AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT') -- Only valid divisions for CFU WIB
+    AND l2 = 'EBITDA' -- For EBITDA analysis
+    AND l3 = '-' -- Get L2 aggregates
+GROUP BY period, div
+ORDER BY actual_value DESC;
+
+-- Calculate actual Net Income for each unit and percentage of total CFU WIB Net Income
+SELECT
+    div AS unit_name,
+    SUM(real_mtd) AS actual_value,
+    ROUND(SUM(real_mtd) * 100.0 / (SELECT SUM(real_mtd) FROM cfu_performance_data WHERE period = (SELECT MAX(period) FROM cfu_performance_data) AND l2 = 'NET INCOME' AND l3 = '-' AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')), 2) AS percentage_of_total
+FROM cfu_performance_data
+WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+    AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT') -- Only valid divisions for CFU WIB
+    AND l2 = 'NET INCOME' -- For Net Income analysis
+    AND l3 = '-' -- Get L2 aggregates
+GROUP BY period, div
+ORDER BY actual_value DESC;
+'''
+
+revenue_proportion_analysis_prompt = '''
+Task: Calculate the proportion of revenue for a specific unit against total CFU WIB revenue and analyze trends over time.
+
+CRITICAL USER MAPPING: When user says "unit", they mean "div" (division) in database!
+
+Rules:
+- ALWAYS translate user's "unit" to "div" in WHERE clause.
+- Handle the following specific queries:
+  - "Berapa besar porsi revenue [unit] terhadap total CFU WIB?" → Calculate percentage of specified unit's revenue against total CFU WIB revenue for the latest period
+  - "Bagaimana tren porsi revenue [unit] terhadap CFU WIB selama 3 tahun terakhir?" → Show annual trend of the unit's revenue percentage against total CFU WIB revenue for the last 3 years
+  - "Bagaimana tren porsi revenue [unit] terhadap CFU WIB dalam tahun ini?" → Show monthly trend of the unit's revenue percentage against total CFU WIB revenue for the current year
+- Calculate percentages by dividing unit revenue by total CFU WIB revenue and multiplying by 100.
+- For single period: Use latest period from (SELECT MAX(period) FROM cfu_performance_data)
+- For 3-year annual trend: Convert period to year and aggregate by year
+- For current year monthly trend: Filter for current year and show monthly breakdowns
+- ALWAYS include both actual values and percentages in the results
+- HIERARCHY LOGIC (Crucial):
+  - L2 Aggregate: Filter `l3 = '-'`.
+
+Reference pattern 1 (Single Period Proportion): Calculate the portion of a specific unit's revenue against total CFU WIB revenue
+SELECT
+    div AS unit_name,
+    period,
+    SUM(real_mtd) AS unit_revenue,
+    (SELECT SUM(real_mtd) FROM cfu_performance_data WHERE period = (SELECT MAX(period) FROM cfu_performance_data) AND l2 = 'REVENUE' AND l3 = '-' AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')) AS total_cfu_wib_revenue,
+    ROUND(SUM(real_mtd) * 100.0 / (SELECT SUM(real_mtd) FROM cfu_performance_data WHERE period = (SELECT MAX(period) FROM cfu_performance_data) AND l2 = 'REVENUE' AND l3 = '-' AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')), 2) AS percentage_of_total
+FROM cfu_performance_data
+WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+    AND div = 'TELIN' -- Replace with specified unit
+    AND l2 = 'REVENUE'
+    AND l3 = '-' -- Get L2 aggregate
+GROUP BY period, div;
+
+Reference pattern 2 (3-Year Annual Trend): Show how a unit's revenue proportion has changed over the last 3 years
+SELECT
+    div AS unit_name,
+    CAST(period AS TEXT) AS year, -- Extract year from period
+    SUBSTR(CAST(period AS TEXT), 1, 4) AS year_only, -- Get year part from period (YYYYMM format)
+    SUM(real_mtd) AS unit_revenue,
+    (SELECT SUM(real_mtd) FROM cfu_performance_data c2 WHERE SUBSTR(CAST(c2.period AS TEXT), 1, 4) = SUBSTR(CAST(c1.period AS TEXT), 1, 4) AND c2.l2 = 'REVENUE' AND c2.l3 = '-' AND c2.div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')) AS total_yearly_cfu_wib_revenue,
+    ROUND(SUM(real_mtd) * 100.0 / (SELECT SUM(real_mtd) FROM cfu_performance_data c3 WHERE SUBSTR(CAST(c3.period AS TEXT), 1, 4) = SUBSTR(CAST(c1.period AS TEXT), 1, 4) AND c3.l2 = 'REVENUE' AND c3.l3 = '-' AND c3.div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')), 2) AS percentage_of_total
+FROM cfu_performance_data c1
+WHERE SUBSTR(CAST(period AS TEXT), 1, 4) IN (
+    SELECT DISTINCT SUBSTR(CAST(period AS TEXT), 1, 4)
+    FROM cfu_performance_data
+    ORDER BY period DESC
+    LIMIT 3 -- Get last 3 years
+)
+    AND div = 'TELIN' -- Replace with specified unit
+    AND l2 = 'REVENUE'
+    AND l3 = '-' -- Get L2 aggregate
+GROUP BY SUBSTR(CAST(period AS TEXT), 1, 4), div
+ORDER BY year_only DESC;
+
+Reference pattern 3 (Current Year Monthly Trend): Show monthly breakdown of the unit's revenue proportion for the current year
+SELECT
+    div AS unit_name,
+    period,
+    SUBSTR(CAST(period AS TEXT), 5, 2) AS month, -- Get month part from period (YYYYMM format)
+    SUM(real_mtd) AS unit_revenue,
+    (SELECT SUM(real_mtd) FROM cfu_performance_data c2 WHERE SUBSTR(CAST(c2.period AS TEXT), 1, 4) = SUBSTR(CAST(c1.period AS TEXT), 1, 4) AND c2.l2 = 'REVENUE' AND c2.l3 = '-' AND c2.div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')) AS total_monthly_cfu_wib_revenue,
+    ROUND(SUM(real_mtd) * 100.0 / (SELECT SUM(real_mtd) FROM cfu_performance_data c3 WHERE SUBSTR(CAST(c3.period AS TEXT), 1, 4) = SUBSTR(CAST(c1.period AS TEXT), 1, 4) AND c3.l2 = 'REVENUE' AND c3.l3 = '-' AND c3.div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')), 2) AS percentage_of_total
+FROM cfu_performance_data c1
+WHERE SUBSTR(CAST(period AS TEXT), 1, 4) = (SELECT SUBSTR(CAST(MAX(period) AS TEXT), 1, 4) FROM cfu_performance_data) -- Current year
+    AND div = 'TELIN' -- Replace with specified unit
+    AND l2 = 'REVENUE'
+    AND l3 = '-' -- Get L2 aggregate
 GROUP BY period, div
 ORDER BY period ASC;
 '''
