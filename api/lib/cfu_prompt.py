@@ -946,3 +946,184 @@ WHERE SUBSTR(CAST(period AS TEXT), 1, 4) = (SELECT SUBSTR(CAST(MAX(period) AS TE
 GROUP BY period, div
 ORDER BY period ASC;
 '''
+
+revenue_growth_analysis_prompt = '''
+Task: Perform comprehensive revenue growth analysis covering MoM and YoY revenue analysis for CFU WIB and all individual units, including checking for declines and increases in revenue by product.
+
+CRITICAL USER MAPPING: When user says "unit", they mean "div" (division) in database!
+
+Rules:
+- Handle the following types of queries:
+  1. "Apakah terjadi penurunan revenue secara Month on Month / MOM di CFU WIB?" - Check if there is MoM revenue decline in total CFU WIB and identify units that contribute to the decline
+  2. "Produk apa saja yang mengalami penurunan Revenue secara Month on Month / MOM?" - Find products with MoM revenue decrease across all units and calculate absolute revenue decrease
+  3. "Produk apa saja yang mengalami kenaikan Revenue secara Month on Month / MOM?" - Find products with MoM revenue increase across all units and calculate absolute revenue increase
+  4. "Produk apa saja yang mengalami penurunan Revenue secara Year on Year / YoY?" - Find products with YoY revenue decrease across all units and calculate absolute revenue decrease
+  5. "Produk apa saja yang mengalami kenaikan Revenue secara Year on Year / YoY?" - Find products with YoY revenue increase across all units and calculate absolute revenue increase
+  6. "Apa penyebab terjadinya penurunan Revenue MOM untuk [unit]?" - Identify reasons for MoM revenue decline for specific unit
+
+- Determine which type of query based on user input and generate appropriate SQL:
+  - For CFU WIB MoM decline check: Query total revenue for CFU WIB and identify declining units
+  - For MoM revenue decrease by product: Query l2 = 'REVENUE' AND mom < 0, order by biggest absolute decrease
+  - For MoM revenue increase by product: Query l2 = 'REVENUE' AND mom > 0, order by biggest absolute increase
+  - For YoY revenue decrease by product: Query l2 = 'REVENUE' AND yoy < 0, order by biggest absolute decrease
+  - For YoY revenue increase by product: Query l2 = 'REVENUE' AND yoy > 0, order by biggest absolute increase
+  - For unit-specific MoM decline cause: Filter for specific unit, l2 = 'REVENUE' AND mom < 0, order by biggest absolute decrease
+
+- CFU WIB HANDLING (CRITICAL):
+  - For total CFU WIB: Include all divisions (DMT, DWS, TELIN, TIF, TSAT) in the aggregation
+  - For specific units: Filter for that specific division
+
+- HIERARCHY LOGIC (Crucial):
+  - L2 Aggregate: Filter `l3 = '-'`.
+  - L3/L4 detailed products: Filter `l5 = '-'` to get L4 items
+
+- Always include both absolute change and percentage change in results
+- Calculate absolute change as: real_mtd - prev_month (for MoM) or real_mtd - prev_year (for YoY)
+- Calculate percentage change as: ((current - previous) / previous) * 100 (with safety check for division by zero)
+- ORDER BY appropriate metric depending on query type:
+  - For decrease analysis: ORDER BY (SUM(real_mtd) - SUM(prev_month)) ASC or (SUM(real_mtd) - SUM(prev_year)) ASC
+  - For increase analysis: ORDER BY (SUM(real_mtd) - SUM(prev_month)) DESC or (SUM(real_mtd) - SUM(prev_year)) DESC
+- LIMIT to 5-10 results initially (LIMIT 10), allow for more data to be displayed if user requests
+- ALWAYS include `period` in the SELECT clause
+
+Reference patterns based on query type:
+
+1. CFU WIB MoM decline check:
+-- Query to get actual and MoM revenue data for total CFU WIB, and identify units that contribute to MoM decline
+WITH cfu_wib_total AS (
+    SELECT
+        'CFU WIB' AS unit_name,
+        period,
+        SUM(real_mtd) AS actual_revenue,
+        SUM(prev_month) AS prev_month_revenue,
+        SUM(real_mtd) - SUM(prev_month) AS absolute_change,
+        ROUND(AVG(mom), 2) AS mom_growth_pct
+    FROM cfu_performance_data
+    WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+        AND l2 = 'REVENUE'
+        AND l3 = '-'
+        AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')
+    GROUP BY period
+),
+unit_contributions AS (
+    SELECT
+        div AS unit_name,
+        period,
+        SUM(real_mtd) AS actual_revenue,
+        SUM(prev_month) AS prev_month_revenue,
+        SUM(real_mtd) - SUM(prev_month) AS absolute_change,
+        ROUND(AVG(mom), 2) AS mom_growth_pct
+    FROM cfu_performance_data
+    WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+        AND l2 = 'REVENUE'
+        AND l3 = '-'
+        AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')
+        AND AVG(mom) < 0  -- Only return units with negative MoM growth (contribute to decline)
+    GROUP BY period, div
+)
+SELECT * FROM cfu_wib_total
+UNION ALL
+SELECT * FROM unit_contributions
+ORDER BY unit_name;
+
+2. Products with biggest MoM revenue decrease:
+SELECT
+    div AS unit_name,
+    l3 AS product_category,
+    l4 AS product_detail,
+    period,
+    SUM(real_mtd) AS revenue_current,
+    SUM(prev_month) AS revenue_previous_month,
+    SUM(real_mtd) - SUM(prev_month) AS absolute_decrease,
+    ROUND(AVG(mom), 2) AS mom_growth_pct
+FROM cfu_performance_data
+WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+    AND l2 = 'REVENUE'
+    AND mom < 0
+    AND l5 = '-' -- Get L4 items for detailed product analysis
+    AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')
+GROUP BY period, div, l3, l4
+ORDER BY (SUM(real_mtd) - SUM(prev_month)) ASC -- ASC because we want biggest DECREASES (negative values)
+LIMIT 10;
+
+3. Products with biggest MoM revenue increase:
+SELECT
+    div AS unit_name,
+    l3 AS product_category,
+    l4 AS product_detail,
+    period,
+    SUM(real_mtd) AS revenue_current,
+    SUM(prev_month) AS revenue_previous_month,
+    SUM(real_mtd) - SUM(prev_month) AS absolute_increase,
+    ROUND(AVG(mom), 2) AS mom_growth_pct
+FROM cfu_performance_data
+WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+    AND l2 = 'REVENUE'
+    AND mom > 0
+    AND l5 = '-' -- Get L4 items for detailed product analysis
+    AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')
+GROUP BY period, div, l3, l4
+ORDER BY (SUM(real_mtd) - SUM(prev_month)) DESC -- DESC to get biggest INCREASES (positive values)
+LIMIT 10;
+
+4. Products with biggest YoY revenue decrease:
+SELECT
+    div AS unit_name,
+    l3 AS product_category,
+    l4 AS product_detail,
+    period,
+    SUM(real_mtd) AS revenue_current,
+    SUM(prev_year) AS revenue_previous_year_same_period,
+    SUM(real_mtd) - SUM(prev_year) AS absolute_decrease,
+    ROUND(AVG(yoy), 2) AS yoy_growth_pct
+FROM cfu_performance_data
+WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+    AND l2 = 'REVENUE'
+    AND yoy < 0
+    AND l5 = '-' -- Get L4 items for detailed product analysis
+    AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')
+GROUP BY period, div, l3, l4
+ORDER BY (SUM(real_mtd) - SUM(prev_year)) ASC -- ASC because we want biggest DECREASES (negative values)
+LIMIT 10;
+
+5. Products with biggest YoY revenue increase:
+SELECT
+    div AS unit_name,
+    l3 AS product_category,
+    l4 AS product_detail,
+    period,
+    SUM(real_mtd) AS revenue_current,
+    SUM(prev_year) AS revenue_previous_year_same_period,
+    SUM(real_mtd) - SUM(prev_year) AS absolute_increase,
+    ROUND(AVG(yoy), 2) AS yoy_growth_pct
+FROM cfu_performance_data
+WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+    AND l2 = 'REVENUE'
+    AND yoy > 0
+    AND l5 = '-' -- Get L4 items for detailed product analysis
+    AND div IN ('DMT', 'DWS', 'TELIN', 'TIF', 'TSAT')
+GROUP BY period, div, l3, l4
+ORDER BY (SUM(real_mtd) - SUM(prev_year)) DESC -- DESC to get biggest INCREASES (positive values)
+LIMIT 10;
+
+6. Root cause analysis for specific unit MoM revenue decline:
+SELECT
+    div AS unit_name,
+    l3 AS product_category,
+    l4 AS product_detail,
+    period,
+    SUM(real_mtd) AS revenue_current,
+    SUM(prev_month) AS revenue_previous_month,
+    SUM(real_mtd) - SUM(prev_month) AS absolute_difference,
+    ROUND(((SUM(real_mtd) - SUM(prev_month)) / CASE WHEN SUM(prev_month) = 0 THEN 1 ELSE ABS(SUM(prev_month)) END) * 100, 2) AS percentage_change,
+    ROUND(AVG(mom), 2) AS mom_growth_pct
+FROM cfu_performance_data
+WHERE period = (SELECT MAX(period) FROM cfu_performance_data)
+    AND div = 'TELIN' -- Replace with specific unit provided by user
+    AND l2 = 'REVENUE'
+    AND mom < 0
+    AND l5 = '-' -- Get L4 items for detailed product analysis
+GROUP BY period, div, l3, l4
+ORDER BY (SUM(real_mtd) - SUM(prev_month)) ASC -- ASC for biggest decreases (most negative values)
+LIMIT 10;
+'''
