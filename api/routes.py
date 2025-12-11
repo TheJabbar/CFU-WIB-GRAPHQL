@@ -164,7 +164,7 @@ async def select_table_and_prompt(user_query: str) -> Tuple[str, str, str]:
         user_query=user_query,
     )
     logger.debug(f"[Timing] select_table_and_prompt {(time.monotonic() - t0):.2f}s")
-
+    
     parsed = _safe_json_loads(raw, required_keys=["table_name", "prompt"])
     if not parsed:
         logger.warning(f"[Agentic] select_table invalid JSON. Raw: {str(raw)[:300]}")
@@ -176,6 +176,7 @@ async def select_table_and_prompt(user_query: str) -> Tuple[str, str, str]:
 
     table_name = parsed["table_name"]
     prompt_name = parsed["prompt"]
+    logger.debug(f"Selected table: {table_name}, prompt: {prompt_name}")
     instruction_prompt = settings.get_prompt_by_name(prompt_name)
 
     # If the selected prompt is for greetings, we don't need a valid table.

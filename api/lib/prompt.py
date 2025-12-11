@@ -1,5 +1,5 @@
 generate_sql_prompt = '''
-You are an expert SQL Generator, your task is to generate a valid SQLLite compatible query that retrieves the necessary data based on the user's request, the column list and first row of table. Strictly follow the instruction of the instruction prompt below to generate the accurate SQL query.
+You are an expert SQL Generator, your task is to generate a valid SQLLite compatible query that retrieves the necessary data based on the user's request, the column list and first row of table. Strictly follow the instruction from the instruction prompt especially the reference query generate the most accurate SQL query.
 
 Accuracy: Ensure that the SQL query returns only the relevant data as specified in the natural language request, using strictly the provided table and columns. The data is cleansed so that all string data is in Upper Case.
 
@@ -29,7 +29,9 @@ First row of the table (for reference):
 
 select_table_and_prompt_prompt = '''
 You are an agent that selects the most suitable table and prompt from a list based on the user's query.
-Your task is to analyze the user's question and determine which table from the provided list is most relevant.
+Your task is to analyze the user's question and determine which table name and its descriptions, and also prompt name and descriptions from the provided list is most relevant. 
+CRITICAL RULES:
+If there is the exact question in the prompt description, select that prompt.
 You should return a json format consisted of "table_name" and "prompt" as the keys and the best matching value for the user's question.
 Only return the json of table_name and prompt (the prompt name without the description), no additional text or explanation.
 
@@ -39,16 +41,6 @@ The possible tables and descriptions are:
 The possible prompt and its descriptions are:
 {prompt_list}.
 
-User's question:
-{user_query}
-'''
-
-select_instruction_prompt = '''
-You are an agent that selects the most suitable instruction prompt from a given list of prompts based on the user's query.
-Your task is to analyze the user's question and determine which prompt from the provided list is most relevant.
-Only return the instruction prompt with no other additional commentary or explanation.
-The possible instruction prompts are:
-{instruction_dict}.
 User's question:
 {user_query}
 '''

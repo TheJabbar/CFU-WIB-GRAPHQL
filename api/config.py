@@ -25,6 +25,16 @@ from lib.cfu_prompt import (
     top_contributing_segments_prompt,
     revenue_proportion_analysis_prompt,
     revenue_growth_analysis_prompt,
+    cfu_wib_mom_revenue_decline_check_prompt,
+    mom_revenue_decrease_products_prompt,
+    mom_revenue_increase_products_prompt,
+    yoy_revenue_decrease_products_prompt,
+    yoy_revenue_increase_products_prompt,
+    unit_revenue_mom_decline_cause_prompt,
+    top_revenue_contributing_products_prompt,
+    revenue_underachievement_products_prompt,
+    revenue_growth_comparison_prompt,
+    revenue_surge_products_year_prompt,
 )
 from lib.general_q_prompt import cfu_wib_prompt
 
@@ -114,12 +124,12 @@ class Settings(BaseSettings):
             "instruction_prompt": netincome_failure_analysis_prompt,
         },
         {
-            "prompt_name": "CFU Negative Growth Products Analysis",
-            "prompt_description": "Identify products/categories with negative growth (GMOM < 0%) showing detailed product breakdown and growth rates.",
+            "prompt_name": "CFU Product with Negative Growth",
+            "prompt_description": "For question similar to 'Produk apa yang tumbuh negatif pada unit [unit] ?'",
             "instruction_prompt": negative_growth_products_prompt,
         },
         {
-            "prompt_name": "CFU EBITDA Negative Growth Analysis",
+            "prompt_name": "EBITDA Negative Growth Analysis",
             "prompt_description": "Analyze EBITDA negative growth by examining Revenue decline and COE cost increases that impact EBITDA growth.",
             "instruction_prompt": ebitda_negative_growth_prompt,
         },
@@ -139,8 +149,8 @@ class Settings(BaseSettings):
             "instruction_prompt": cfu_wib_prompt,
         },
         {
-            "prompt_name": "CFU Top Contributing Segments Analysis",
-            "prompt_description": "Identify which business segments/divisions provide the largest contribution to Revenue, COE, and EBITDA for CFU WIB.",
+            "prompt_name": "CFU Top Contributing Segments/Unit/Divisions Analysis",
+            "prompt_description": "For questions regarding which business segments/divisions provide the largest contribution to Revenue, COE, and EBITDA for CFU WIB. Questions must be similar to these lists and not mentioning product: Segmen / Unit bisnis apa yang memberikan kontribusi revenue / pendapatan terbesar untuk CFU WIB?, Segmen / Unit bisnis apa yang memberikan kontribusi COE terbesar untuk CFU WIB?, Segmen / Unit bisnis apa yang memberikan kontribusi EBITDA terbesar untuk CFU WIB?, Segmen / Unit bisnis apa yang memberikan kontribusi Net Income terbesar untuk CFU WIB? ",
             "instruction_prompt": top_contributing_segments_prompt,
         },
         {
@@ -149,9 +159,54 @@ class Settings(BaseSettings):
             "instruction_prompt": revenue_proportion_analysis_prompt,
         },
         {
-            "prompt_name": "CFU Revenue Growth Analysis (Comprehensive)",
-            "prompt_description": "Comprehensive revenue growth analysis covering MoM and YoY revenue analysis for CFU WIB and all individual units, including checking for declines and increases in revenue by product.",
-            "instruction_prompt": revenue_growth_analysis_prompt,
+            "prompt_name": "CFU WIB MoM Revenue Decline Check",
+            "prompt_description": "Check if there is a revenue decline (Month on Month / MOM) in CFU WIB by performing query to extract total actual and MoM revenue for CFU WIB and check units that contribute to the MoM decline. For question similar to 'Apakah terjadi penurunan revenue secara Month on Month / MOM di CFU WIB?'",
+            "instruction_prompt": cfu_wib_mom_revenue_decline_check_prompt,
+        },
+        {
+            "prompt_name": "CFU Products with MoM Revenue Decrease",
+            "prompt_description": "Find products that experienced revenue decline (Month on Month / MOM) across all units and calculate absolute revenue decrease (current revenue - previous month revenue), displaying top 5-10 products with biggest absolute decrease in order. For question similar to 'Produk apa saja yang mengalami penurunan Revenue secara Month on Month / MOM?'",
+            "instruction_prompt": mom_revenue_decrease_products_prompt,
+        },
+        {
+            "prompt_name": "CFU Products with MoM Revenue Increase",
+            "prompt_description": "Find products that experienced revenue increase (Month on Month / MOM) across all units and calculate absolute revenue increase (current revenue - previous month revenue), displaying top 5-10 products with biggest absolute increase in order. For question similar to 'Produk apa saja yang mengalami kenaikan Revenue secara Month on Month / MOM?'",
+            "instruction_prompt": mom_revenue_increase_products_prompt,
+        },
+        {
+            "prompt_name": "CFU Products with YoY Revenue Decrease",
+            "prompt_description": "Find products that experienced revenue decline (Year on Year / YoY) across all units and calculate absolute revenue decrease (current revenue - previous year revenue same period), displaying top 5-10 products with biggest absolute decrease in order. For question similar to 'Produk apa saja yang mengalami penurunan Revenue secara Year on Year / YoY?'",
+            "instruction_prompt": yoy_revenue_decrease_products_prompt,
+        },
+        {
+            "prompt_name": "CFU Products with YoY Revenue Increase",
+            "prompt_description": "Find products that experienced revenue increase (Year on Year / YoY) across all units and calculate absolute revenue increase (current revenue - previous year revenue same period), displaying top 5-10 products with biggest absolute increase in order. For question similar to 'Produk apa saja yang mengalami kenaikan Revenue secara Year on Year / YoY?'",
+            "instruction_prompt": yoy_revenue_increase_products_prompt,
+        },
+        {
+            "prompt_name": "CFU Unit MoM Revenue Decline Cause Analysis",
+            "prompt_description": "Find the cause for MoM revenue decline for a specific unit by querying for revenue products with negative MoM growth and displaying top 5-10 products with the biggest differences (decrease) with their percentages. For question similar to 'Apa penyebab terjadinya penurunan Revenue MOM untuk [unit]?'",
+            "instruction_prompt": unit_revenue_mom_decline_cause_prompt,
+        },
+        {
+            "prompt_name": "CFU Top Revenue Contributing Products Analysis",
+            "prompt_description": "Find products that contribute the most to revenue for CFU WIB by analyzing actual values and their percentages against the total, displaying top 10 products with highest revenue contribution. For question similar to 'Dari seluruh CFU WIB, produk apa yang paling berkontribusi terhadap revenue CFU WIB?'",
+            "instruction_prompt": top_revenue_contributing_products_prompt,
+        },
+        {
+            "prompt_name": "CFU Revenue Underachievement Products Analysis",
+            "prompt_description": "Find products that contribute most to revenue underachievement for CFU WIB by calculating the shortfall (target - actual revenue) and showing the achievement percentage, displaying top 10 products with largest shortfalls. For question similar to 'Dari seluruh CFU WIB, produk apa yang paling berkontribusi terhadap ketidaktercapaian revenue CFU WIB?'",
+            "instruction_prompt": revenue_underachievement_products_prompt,
+        },
+        {
+            "prompt_name": "CFU Revenue Growth Comparison Analysis",
+            "prompt_description": "Show Month-over-Month (MoM) and Year-over-Year (YoY) revenue growth comparison for CFU WIB and its individual units, including identifying products that contribute to growth or decline. For question similar to 'Bagaimana pertumbuhan pendapatan / revenue dibandingkan periode sebelumnya?'",
+            "instruction_prompt": revenue_growth_comparison_prompt,
+        },
+        {
+            "prompt_name": "CFU Revenue Surge Products in Year Analysis",
+            "prompt_description": "Find products that experienced revenue surge (Month on Month / MOM) in a specific year compared to their previous months' average, identifying products with MOM > 10% above the 3-month average. For question similar to 'Apakah ada produk yang mengalami lonjakan Revenue secara MoM pada tahun [tahun]?'",
+            "instruction_prompt": revenue_surge_products_year_prompt,
         }
     ]
 
