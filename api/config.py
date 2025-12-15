@@ -24,7 +24,6 @@ from lib.cfu_prompt import (
     external_revenue_trend_prompt,
     top_contributing_segments_prompt,
     revenue_proportion_analysis_prompt,
-    revenue_growth_analysis_prompt,
     cfu_wib_mom_revenue_decline_check_prompt,
     mom_revenue_decrease_products_prompt,
     mom_revenue_increase_products_prompt,
